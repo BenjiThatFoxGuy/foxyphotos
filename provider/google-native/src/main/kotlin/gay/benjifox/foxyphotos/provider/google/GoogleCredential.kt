@@ -6,31 +6,32 @@ import java.nio.charset.StandardCharsets
 class GoogleCredential internal constructor(
     val accountEmail: String,
     val androidId: String,
-    private val app: String,
-    private val clientSignature: String,
-    private val token: String,
-    private val language: String,
-    private val service: String,
+    private val formFields: List<Pair<String, String>>,
 ) {
     val hasRequiredFields: Boolean
-        get() = listOf(androidId, app, clientSignature, accountEmail, token, language, service)
-            .all(String::isNotBlank)
+        get() = GoogleCredentialParser.requiredFields.all { fieldValue(it).isNullOrBlank().not() }
 
-    internal fun authenticationFields(): Map<String, String> = mapOf(
-        "androidId" to androidId,
-        "app" to app,
-        "client_sig" to clientSignature,
-        "Email" to accountEmail,
-        "Token" to token,
-        "lang" to language,
-        "service" to service,
-    )
+    @JvmSynthetic
+    internal fun authRequestFields(): List<Pair<String, String>> = formFields
+        .filterNot { (name, _) -> name in ignoredAuthFields || name == "app" || name == "callerPkg" }
+        .plus("app" to googlePhotosPackage)
+        .plus("callerPkg" to googlePhotosPackage)
+
+    @JvmSynthetic
+    internal fun requiresTokenBinding(): Boolean = !fieldValue("token_binding_alias").isNullOrBlank()
 
     override fun toString(): String = "GoogleCredential(accountEmail=$accountEmail)"
+
+    private fun fieldValue(name: String): String? = formFields.firstOrNull { it.first == name }?.second
+
+    private companion object {
+        const val googlePhotosPackage = "com.google.android.apps.photos"
+        val ignoredAuthFields = setOf("it_caveat_types", "assertion_jwt", "token_binding_alias")
+    }
 }
 
 object GoogleCredentialParser {
-    private val requiredFields = setOf(
+    internal val requiredFields = setOf(
         "androidId",
         "app",
         "client_sig",
@@ -45,25 +46,23 @@ object GoogleCredentialParser {
             .trim()
             .split('&')
             .filter(String::isNotBlank)
-            .associate { pair ->
+            .map { pair ->
                 val separator = pair.indexOf('=')
                 require(separator > 0) { "Google credential contains an invalid field." }
                 decode(pair.substring(0, separator)) to decode(pair.substring(separator + 1))
             }
 
-        val missing = requiredFields.filter { fields[it].isNullOrBlank() }
+        fun fieldValue(name: String): String? = fields.firstOrNull { it.first == name }?.second
+
+        val missing = requiredFields.filter { fieldValue(it).isNullOrBlank() }
         require(missing.isEmpty()) {
             "Google credential is missing required field(s): ${missing.joinToString(", ")}."
         }
 
         return GoogleCredential(
-            accountEmail = fields.getValue("Email"),
-            androidId = fields.getValue("androidId"),
-            app = fields.getValue("app"),
-            clientSignature = fields.getValue("client_sig"),
-            token = fields.getValue("Token"),
-            language = fields.getValue("lang"),
-            service = fields.getValue("service"),
+            accountEmail = fieldValue("Email")!!,
+            androidId = fieldValue("androidId")!!,
+            formFields = fields,
         )
     }
 
