@@ -2,6 +2,18 @@ package gay.benjifox.foxyphotos
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.imePadding
+
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -86,19 +98,31 @@ private fun FoxyPhotosApp() {
     val backupState by BackupRuntime.state.collectAsStateWithLifecycle()
     val isRunning = backupState.active
     val backupCounts = backupState.counts
-    val paused = when (backupState.phase) {
-        BackupPhase.IDLE -> preferences.getBoolean("paused", true)
-        BackupPhase.PAUSING, BackupPhase.PAUSED, BackupPhase.CANCELLED,
-        BackupPhase.TIMED_OUT, BackupPhase.ERRORS -> true
-        else -> false
-    }
-    var activityStatus by remember { mutableStateOf("Waiting for setup") }
+
+    var activityStatus by remember { mutableStateOf("Not connected") }
     var scanError by remember { mutableStateOf<String?>(null) }
+    var savingCredential by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
-        // Permission denial only hides drawer controls, never denies the backup itself.
-        BackupRuntime.command(context, BackupService.START)
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !preferences.getBoolean("notification-permission-requested", false)) {
+            preferences.edit().putBoolean("notification-permission-requested", true).apply()
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -107,9 +131,9 @@ private fun FoxyPhotosApp() {
             try {
                 val parsed = GoogleCredentialParser.parse(savedCredential.decodeToString())
                 configuredAccount = parsed.accountEmail
-                activityStatus = "Saved Google credential · scan folders to choose backup sources"
+                activityStatus = "Ready"
             } catch (_: IllegalArgumentException) {
-                activityStatus = "Saved Google credential needs replacement"
+                activityStatus = "Reconnect Google Photos"
             } finally {
                 savedCredential.fill(0)
             }
@@ -123,13 +147,13 @@ private fun FoxyPhotosApp() {
     fun scanFolders() {
         scope.launch {
             try {
-                activityStatus = "Scanning local folders"
+                activityStatus = "Scanning folders…"
                 folders = scanner.scan()
                 scanError = null
                 if (selectedFolders.isEmpty() && folders.isNotEmpty()) {
                     persistFolders(folders.map(MediaFolder::relativePath).toSet())
                 }
-                activityStatus = "Scan complete · ${folders.sumOf(MediaFolder::itemCount)} local items in ${folders.size} folders"
+                activityStatus = "${folders.size} folders · ${folders.sumOf(MediaFolder::itemCount)} items"
             } catch (error: SecurityException) {
                 scanError = "Photo permission is required to scan folders."
                 activityStatus = "Waiting for photo permission"
@@ -137,12 +161,7 @@ private fun FoxyPhotosApp() {
         }
     }
     fun runSelectedFolderBackup() {
-        if (isRunning) return
-        notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
-                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else BackupRuntime.command(context, BackupService.START)
+        if (!isRunning) BackupRuntime.command(context, BackupService.START)
     }
 
     val requiredPermissions = if (Build.VERSION.SDK_INT >= 33) {
@@ -162,11 +181,13 @@ private fun FoxyPhotosApp() {
     }
 
     Scaffold { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().background(Color(0xFF101015)).padding(padding).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().background(Color(0xFF101015)).padding(padding).imePadding(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item(key = "header") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { menuExpanded = true }) {
                         val dotColor = MaterialTheme.colorScheme.onSurface
@@ -183,40 +204,54 @@ private fun FoxyPhotosApp() {
                         })
                     }
                 }
-                Text("FoxyPhotos", style = MaterialTheme.typography.headlineLarge)
+                Text("FoxyPhotos", style = MaterialTheme.typography.headlineMedium)
             }
             Text(
-                configuredAccount?.let { "Google Photos · $it" } ?: "Set up your Google destination",
+                configuredAccount ?: "Connect Google Photos",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Current status", style = MaterialTheme.typography.titleMedium)
-                    Text(if (backupState.phase == BackupPhase.IDLE) activityStatus else
-                        "${backupState.phase.title} · ${backupCounts.uploaded} uploaded · ${backupCounts.alreadyPresent} already present · ${backupCounts.failed} failed · ${backupCounts.uncertain} uncertain")
-                    if (configuredAccount != null) {
-                        Text(
-                            text = "${backupStatusLabel(isRunning, paused)} · ${selectedFolders.size} folders selected",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+            }
+            if (!notificationsEnabled) {
+                item(key = "notifications") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Notifications off", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = {
+                            context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+                        }) { Text("Enable") }
+                    }
+                }
+            }
+            if (configuredAccount != null) {
+                item(key = "status") {
+                    Text(if (backupState.phase == BackupPhase.IDLE) activityStatus else backupState.phase.title,
+                        style = MaterialTheme.typography.titleMedium)
+                    if (backupState.phase != BackupPhase.IDLE) {
+                        Text("${backupCounts.uploaded} uploaded · ${backupCounts.alreadyPresent} present · ${backupCounts.failed} failed · ${backupCounts.uncertain} uncertain",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
 
             if (configuredAccount == null) {
+                item(key = "credentials") {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Connect Google Photos", style = MaterialTheme.typography.titleMedium)
-                        Text("FoxyPhotos validates the imported credential with Google before encrypting it locally.")
+                        Text("Google Photos credential", style = MaterialTheme.typography.titleMedium)
                         OutlinedTextField(
                             value = credentialInput,
                             onValueChange = { credentialInput = it; setupError = null },
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("Google Photos credential") },
                             isError = setupError != null,
+                            minLines = 2,
+                            maxLines = 4,
                         )
-                        setupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        Button(enabled = credentialInput.isNotBlank(), onClick = {
+                        Button(enabled = credentialInput.isNotBlank() && !savingCredential, onClick = {
+                            savingCredential = true
                             scope.launch {
                                 val secret = credentialInput.encodeToByteArray()
                                 try {
@@ -224,7 +259,7 @@ private fun FoxyPhotosApp() {
                                     googleAuthClient.exchange(parsed)
                                     credentialStore.saveCredential(CredentialReference("google-native"), secret)
                                     configuredAccount = parsed.accountEmail
-                                    activityStatus = "Google credential validated · scan folders to choose backup sources"
+                                    activityStatus = "Ready"
                                     credentialInput = ""
                                 } catch (error: GoogleAuthenticationException) {
                                     setupError = error.message ?: "Google could not validate that credential."
@@ -234,66 +269,67 @@ private fun FoxyPhotosApp() {
                                     setupError = error.message ?: "That credential is not valid."
                                 } finally {
                                     secret.fill(0)
+                                    savingCredential = false
                                 }
                             }
-                        }) { Text("Validate and save credential") }
+                        }) { Text(if (savingCredential) "Saving…" else "Save") }
+                        setupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     }
+                }
                 }
             } else {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(if (paused) "Backup paused" else "Backup enabled", style = MaterialTheme.typography.titleMedium)
-                        Text("Only enabled folders will be scanned and uploaded.")
-                        Button(enabled = backupState.phase != BackupPhase.PAUSING && backupState.phase != BackupPhase.CANCELLING, onClick = {
+                item(key = "controls") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Button(enabled = backupState.phase != BackupPhase.PAUSING && backupState.phase != BackupPhase.CANCELLING &&
+                            (isRunning || selectedFolders.isNotEmpty()), onClick = {
                             if (isRunning) BackupRuntime.command(context, BackupService.PAUSE)
                             else runSelectedFolderBackup()
-                        }) { Text(if (isRunning) "Pause backup" else "Resume backup") }
+                        }) { Text(when {
+                            backupState.phase == BackupPhase.PAUSING -> "Pausing…"
+                            backupState.phase == BackupPhase.CANCELLING -> "Cancelling…"
+                            isRunning -> "Pause"
+                            backupState.phase == BackupPhase.PAUSED -> "Resume"
+                            else -> "Back up"
+                        }) }
                         if (isRunning) {
-                            Button(onClick = { BackupRuntime.command(context, BackupService.CANCEL) }) { Text("Cancel backup") }
+                            TextButton(enabled = backupState.phase != BackupPhase.CANCELLING,
+                                onClick = { BackupRuntime.command(context, BackupService.CANCEL) }) { Text("Cancel") }
                         }
-                        Text("Started backups continue in the background. Pause finishes the current item; Cancel stops the run.")
-                        if (!notificationsEnabled) {
-                            Text("Notifications are disabled. Backup still runs in the background; use this screen to pause or cancel. Android may show it in Active apps instead.")
-                        }
-                        Button(
-                            enabled = !isRunning && !paused && selectedFolders.isNotEmpty(),
-                            onClick = ::runSelectedFolderBackup,
-                        ) { Text("Back up selected folders") }
+                        Text("${selectedFolders.size} selected", style = MaterialTheme.typography.bodySmall)
                     }
                 }
-
+                item(key = "folder-actions") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
+                    TextButton(onClick = {
                         val permitted = requiredPermissions.any {
                             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
                         }
                         if (permitted) scanFolders() else permissionLauncher.launch(requiredPermissions)
-                    }) { Text(if (folders.isEmpty()) "Scan folders" else "Rescan folders") }
-                    Button(enabled = folders.isNotEmpty(), onClick = { persistFolders(emptySet()) }) {
+                    }) { Text(if (folders.isEmpty()) "Scan folders" else "Rescan") }
+                    TextButton(enabled = selectedFolders.isNotEmpty(), onClick = { persistFolders(emptySet()) }) {
                         Text("Clear selection")
                     }
                 }
                 scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Text("Folders to back up", style = MaterialTheme.typography.titleMedium)
+                Text("Folders", style = MaterialTheme.typography.titleMedium)
+                }
                 if (folders.isEmpty()) {
-                    Text("Scan your device to choose which folders FoxyPhotos may back up.")
+                    item(key = "empty") { Text("No folders loaded") }
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(folders, key = MediaFolder::relativePath) { folder ->
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Checkbox(
-                                    checked = folder.relativePath in selectedFolders,
-                                    onCheckedChange = { checked ->
-                                        persistFolders(if (checked) selectedFolders + folder.relativePath else selectedFolders - folder.relativePath)
-                                    },
-                                )
-                                Column {
-                                    Text(folder.relativePath)
-                                    Text(
-                                        "${folder.itemCount} items · ${folder.imageCount} photos · ${folder.videoCount} videos",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
+                    items(folders, key = { "folder:${it.relativePath}" }) { folder ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = folder.relativePath in selectedFolders,
+                                onCheckedChange = { checked ->
+                                    persistFolders(if (checked) selectedFolders + folder.relativePath else selectedFolders - folder.relativePath)
+                                },
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(folder.relativePath, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("${folder.itemCount} items", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
