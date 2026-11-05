@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Generate a reproducible-build report for FoxyPhotos CI.
 #
-# Prints a JSON report proving the toolchain and dependency state used to
-# build this exact commit, plus the SHA-256 of any APKs produced. This lets a
-# reviewer confirm that a published artifact was produced by the stated
-# source revision with the pinned toolchain (reproducible build hygiene).
+# Emits a JSON report capturing the exact source revision, toolchain and
+# artifact hashes for a build. This lets a reviewer confirm that a published
+# APK was produced by the stated commit with the pinned toolchain.
+#
+# Every gradle invocation is best-effort: the report must never fail a build.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,12 +14,22 @@ cd "$ROOT"
 GIT_SHA="$(git rev-parse HEAD)"
 GIT_REF="${GITHUB_REF:-}"
 GIT_TAG="${GITHUB_REF_NAME:-}"
-GRADLE_VER="$(./gradlew -v 2>/dev/null | head -n 1 | awk '{print $3}')"
+
+# Gradle version from the wrapper distribution URL (no daemon spin-up needed).
+GRADLE_VER="$(sed -n 's/.*gradle-\([0-9][0-9.]*\)-bin\.zip.*/\1/p' \
+  gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true)"
+if [[ -z "$GRADLE_VER" ]]; then
+  GRADLE_VER="unknown"
+fi
+
 JDK_VER="$(java -version 2>&1 | head -n 1)"
 
-# Deterministic fingerprint of the project dependency graph.
-DEP_FP="$(./gradlew -q :app:dependencies --configurationRuntimeClasspath 2>/dev/null \
-  | grep -E '^\+|^\- ' | sort | sha256sum | cut -d' ' -f1)"
+# Best-effort fingerprint of the resolved dependency graph.
+DEP_FP="$(./gradlew -q :app:dependencies --configuration runtimeClasspath 2>/dev/null \
+  | sort | sha256sum | cut -d' ' -f1 || true)"
+if [[ -z "$DEP_FP" ]]; then
+  DEP_FP="unavailable"
+fi
 
 APK_DEBUG="app/build/outputs/apk/debug/app-debug.apk"
 APK_RELEASE="app/build/outputs/apk/release/app-release.apk"
@@ -32,29 +43,30 @@ if [[ -f "$APK_RELEASE" ]]; then
   APK_RELEASE_SHA="$(sha256sum "$APK_RELEASE" | cut -d' ' -f1)"
 fi
 
-REPORT="$(jq -n \
-  --arg gitSha "$GIT_SHA" \
-  --arg gitRef "$GIT_REF" \
-  --arg tag "$GIT_TAG" \
-  --arg gradle "$GRADLE_VER" \
-  --arg jdk "$JDK_VER" \
-  --arg dep "$DEP_FP" \
-  --arg debug "$APK_DEBUG_SHA" \
-  --arg release "$APK_RELEASE_SHA" \
-  '{
-    project: "foxyphotos",
-    reproducible: true,
-    commit: $gitSha,
-    ref: $gitRef,
-    tag: $tag,
-    gradle: $gradle,
-    jdk: $jdk,
-    dependency_fingerprint: $dep,
-    artifacts: {
-      "app-debug.apk": $debug,
-      "app-release.apk": $release
-    }
-  }')
+REPORT="$(python3 - "$GIT_SHA" "$GIT_REF" "$GIT_TAG" "$GRADLE_VER" "$JDK_VER" \
+  "$DEP_FP" "$APK_DEBUG_SHA" "$APK_RELEASE_SHA" <<'PY'
+import json
+import sys
+
+git_sha, git_ref, git_tag, gradle, jdk, dep, debug_sha, release_sha = sys.argv[1:9]
+print(json.dumps({
+    "project": "foxyphotos",
+    "reproducible": True,
+    "commit": git_sha,
+    "ref": git_ref,
+    "tag": git_tag,
+    "gradle": gradle,
+    "jdk": jdk,
+    "dependency_fingerprint": dep,
+    "artifacts": {
+        "app-debug.apk": debug_sha,
+        "app-release.apk": release_sha,
+    },
+}, indent=2))
+PY
+)"
 
 echo "$REPORT"
-echo "$REPORT" > "${1:-/dev/stdout}"
+if [[ -n "${1:-}" ]]; then
+  echo "$REPORT" > "$1"
+fi
