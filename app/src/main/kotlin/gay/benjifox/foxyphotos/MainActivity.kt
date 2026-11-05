@@ -17,6 +17,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -91,6 +93,11 @@ private fun FoxyPhotosApp() {
     val scanner = remember { MediaStoreFolderScanner(context.contentResolver) }
     val scope = rememberCoroutineScope()
     var credentialInput by remember { mutableStateOf("") }
+    var onboarding by rememberSaveable { mutableStateOf(!preferences.getBoolean("onboarding-completed", false)) }
+    var onboardingStep by rememberSaveable { mutableStateOf(0) }
+    var accountLoaded by remember { mutableStateOf(false) }
+    var notificationRequested by remember { mutableStateOf(preferences.getBoolean("notification-permission-requested", false)) }
+    var mediaGranted by remember { mutableStateOf(false) }
     var configuredAccount by remember { mutableStateOf<String?>(null) }
     var setupError by remember { mutableStateOf<String?>(null) }
     var folders by remember { mutableStateOf<List<MediaFolder>>(emptyList()) }
@@ -102,27 +109,25 @@ private fun FoxyPhotosApp() {
     var activityStatus by remember { mutableStateOf("Not connected") }
     var scanError by remember { mutableStateOf<String?>(null) }
     var savingCredential by remember { mutableStateOf(false) }
-    var notificationsEnabled by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
+    fun notificationsAllowed() = NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+        (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context,
+            Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+    var notificationsEnabled by remember { mutableStateOf(notificationsAllowed()) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        notificationsEnabled = notificationsAllowed()
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+                notificationsEnabled = notificationsAllowed()
+                mediaGranted = (if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)).any {
+                    ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            !preferences.getBoolean("notification-permission-requested", false)) {
-            preferences.edit().putBoolean("notification-permission-requested", true).apply()
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
     }
 
     LaunchedEffect(Unit) {
@@ -132,12 +137,19 @@ private fun FoxyPhotosApp() {
                 val parsed = GoogleCredentialParser.parse(savedCredential.decodeToString())
                 configuredAccount = parsed.accountEmail
                 activityStatus = "Ready"
+                // Migrate only installs that predate onboarding, not unfinished first runs.
+                if (!preferences.contains("onboarding-started") && !preferences.contains("onboarding-completed")) {
+                    preferences.edit().putBoolean("onboarding-completed", true).apply()
+                    onboarding = false
+                }
             } catch (_: IllegalArgumentException) {
                 activityStatus = "Reconnect Google Photos"
             } finally {
                 savedCredential.fill(0)
             }
         }
+        accountLoaded = true
+        if (onboarding) preferences.edit().putBoolean("onboarding-started", true).apply()
     }
 
     fun persistFolders(value: Set<String>) {
@@ -172,7 +184,87 @@ private fun FoxyPhotosApp() {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
-        if (granted.values.any { it }) scanFolders() else scanError = "Photo permission was not granted."
+        mediaGranted = requiredPermissions.any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+        if (granted.values.any { it }) scanFolders() else scanError = "Photo access is off. You can try again or use Settings."
+    }
+
+    val credentialForm: @androidx.compose.runtime.Composable () -> Unit = {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Google Photos credential", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(
+                            value = credentialInput,
+                            onValueChange = { credentialInput = it; setupError = null },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Google Photos credential") },
+                            isError = setupError != null,
+                            minLines = 2,
+                            maxLines = 4,
+                        )
+                        Button(enabled = credentialInput.isNotBlank() && !savingCredential, onClick = {
+                            savingCredential = true
+                            scope.launch {
+                                val secret = credentialInput.encodeToByteArray()
+                                try {
+                                    val parsed = GoogleCredentialParser.parse(credentialInput)
+                                    googleAuthClient.exchange(parsed)
+                                    credentialStore.saveCredential(CredentialReference("google-native"), secret)
+                                    configuredAccount = parsed.accountEmail
+                                    activityStatus = "Ready"
+                                    credentialInput = ""
+                                    if (onboarding) onboardingStep = 2
+                                } catch (error: GoogleAuthenticationException) {
+                                    setupError = error.message ?: "Google could not validate that credential."
+                                } catch (_: IOException) {
+                                    setupError = "Could not reach Google. Check your connection and try again."
+                                } catch (error: IllegalArgumentException) {
+                                    setupError = error.message ?: "That credential is not valid."
+                                } finally {
+                                    secret.fill(0)
+                                    savingCredential = false
+                                }
+                            }
+                        }) { Text(if (savingCredential) "Saving…" else "Save") }
+                        setupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+    }
+    if (!accountLoaded) return
+    if (onboarding) {
+        BackHandler(enabled = onboardingStep > 0) { if (!savingCredential) onboardingStep-- }
+        OnboardingScreen(
+            step = onboardingStep,
+            account = configuredAccount,
+            mediaGranted = mediaGranted,
+            notificationsEnabled = notificationsEnabled,
+            notificationRequested = notificationRequested,
+            busy = savingCredential,
+            mediaError = scanError,
+            credentialForm = credentialForm,
+            onBack = { onboardingStep-- },
+            onContinue = { onboardingStep++ },
+            onMedia = { permissionLauncher.launch(requiredPermissions) },
+            onMediaSettings = {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:${context.packageName}")))
+            },
+            onNotifications = {
+                if (Build.VERSION.SDK_INT >= 33 && !notificationRequested) {
+                    notificationRequested = true
+                    preferences.edit().putBoolean("notification-permission-requested", true).apply()
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+                }
+            },
+            onDone = {
+                preferences.edit().putBoolean("onboarding-completed", true).apply()
+                onboarding = false
+                credentialInput = ""
+            },
+        )
+        return
     }
 
     if (showLogs) {
@@ -198,6 +290,11 @@ private fun FoxyPhotosApp() {
                         }
                     }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Setup") }, onClick = {
+                            menuExpanded = false
+                            onboardingStep = 0
+                            onboarding = true
+                        })
                         DropdownMenuItem(text = { Text("View logs...") }, onClick = {
                             menuExpanded = false
                             showLogs = true
@@ -238,44 +335,7 @@ private fun FoxyPhotosApp() {
 
             if (configuredAccount == null) {
                 item(key = "credentials") {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Google Photos credential", style = MaterialTheme.typography.titleMedium)
-                        OutlinedTextField(
-                            value = credentialInput,
-                            onValueChange = { credentialInput = it; setupError = null },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Google Photos credential") },
-                            isError = setupError != null,
-                            minLines = 2,
-                            maxLines = 4,
-                        )
-                        Button(enabled = credentialInput.isNotBlank() && !savingCredential, onClick = {
-                            savingCredential = true
-                            scope.launch {
-                                val secret = credentialInput.encodeToByteArray()
-                                try {
-                                    val parsed = GoogleCredentialParser.parse(credentialInput)
-                                    googleAuthClient.exchange(parsed)
-                                    credentialStore.saveCredential(CredentialReference("google-native"), secret)
-                                    configuredAccount = parsed.accountEmail
-                                    activityStatus = "Ready"
-                                    credentialInput = ""
-                                } catch (error: GoogleAuthenticationException) {
-                                    setupError = error.message ?: "Google could not validate that credential."
-                                } catch (_: IOException) {
-                                    setupError = "Could not reach Google. Check your connection and try again."
-                                } catch (error: IllegalArgumentException) {
-                                    setupError = error.message ?: "That credential is not valid."
-                                } finally {
-                                    secret.fill(0)
-                                    savingCredential = false
-                                }
-                            }
-                        }) { Text(if (savingCredential) "Saving…" else "Save") }
-                        setupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    }
-                }
+                credentialForm()
                 }
             } else {
                 item(key = "controls") {
