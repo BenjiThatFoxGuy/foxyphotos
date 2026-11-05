@@ -1,5 +1,8 @@
 package gay.benjifox.foxyphotos
 
+import android.content.ClipData
+import android.content.Intent
+import androidx.core.content.FileProvider
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +48,7 @@ internal fun DiagnosticLogViewer(diagnostics: AppDiagnostics, onClose: () -> Uni
     var confirmClear by remember { mutableStateOf(false) }
     var exportText by remember { mutableStateOf<String?>(null) }
     var exporting by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
 
     suspend fun refresh() {
         try {
@@ -105,6 +109,9 @@ internal fun DiagnosticLogViewer(diagnostics: AppDiagnostics, onClose: () -> Uni
             if (!snapshot.storageHealthy) Text("storage unavailable; logs are currently memory-only. clear could not be persisted if storage is still unavailable.", color = MaterialTheme.colorScheme.error)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { scope.launch { refresh() } }) { Text("refresh") }
+                Button(onClick = { confirmClear = true }) { Text("clear") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(enabled = !exporting, onClick = {
                     exporting = true
                     scope.launch {
@@ -121,8 +128,38 @@ internal fun DiagnosticLogViewer(diagnostics: AppDiagnostics, onClose: () -> Uni
                         }
                     }
                 }) { Text("export") }
-                Button(onClick = { confirmClear = true }) { Text("clear") }
+                Button(enabled = !sharing, onClick = {
+                    sharing = true
+                    scope.launch {
+                        try {
+                            val text = diagnostics.exportText()
+                            val file = withContext(Dispatchers.IO) {
+                                DiagnosticShareFiles.create(context.cacheDir, text)
+                            }
+                            val uri = FileProvider.getUriForFile(
+                                context, "${context.packageName}.diagnostics.fileprovider", file,
+                            )
+                            val attachment = ClipData.newRawUri("diagnostic logs", uri)
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                clipData = attachment
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(send, "Share diagnostic logs").apply {
+                                clipData = attachment
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            })
+                            status = "share sheet opened with temporary log attachment"
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            status = "could not share logs"
+                        } finally { sharing = false }
+                    }
+                }) { Text("share") }
             }
+            Text("share creates a temporary cache attachment, not a saved document.", style = MaterialTheme.typography.bodySmall)
             HorizontalDivider()
             if (snapshot.lines.isEmpty()) Text("no diagnostic events yet. run a backup, then check here.")
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
