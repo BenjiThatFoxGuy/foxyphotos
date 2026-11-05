@@ -10,3 +10,7 @@ android {
         minSdk = 29
     }
 }
+
+dependencies {
+    implementation(project(":provider:contract"))
+}
