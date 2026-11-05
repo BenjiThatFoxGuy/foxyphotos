@@ -46,6 +46,21 @@ jobs:
       - name: Build and test
         run: ./gradlew check assembleDebug --stacktrace
 
+      - name: Reproducible build report
+        run: |
+          chmod +x .github/repro-report.sh
+          ./.github/repro-report.sh "$RUNNER_TEMP/repro-report.json"
+          cat "$RUNNER_TEMP/repro-report.json"
+
+      - name: Upload reproducible build report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FoxyPhotos-repro-report-${{ github.sha }}
+          path: ${{ runner.temp }}/repro-report.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
