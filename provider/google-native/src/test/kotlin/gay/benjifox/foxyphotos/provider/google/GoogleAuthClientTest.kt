@@ -1,6 +1,5 @@
 package gay.benjifox.foxyphotos.provider.google
 
-import gay.benjifox.foxyphotos.provider.foundation.HttpClient
 import java.io.ByteArrayOutputStream
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -21,11 +20,6 @@ class GoogleAuthClientTest {
     fun `does not expose an endpoint override in production bytecode`() {
         val exposedMethods = GoogleAuthClient::class.java.declaredMethods.asList() +
             GoogleAuthClient::class.java.declaredClasses.flatMap { it.declaredMethods.asList() }
-        assertTrue(
-            GoogleAuthClient::class.java.constructors.none { constructor ->
-                constructor.parameterTypes.any { parameter -> parameter == HttpClient::class.java }
-            },
-        )
         val credentialSecretAccessors = GoogleCredential::class.java.declaredMethods.filter { method ->
             method.name.contains("authRequestFields", ignoreCase = true)
         }
