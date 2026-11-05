@@ -26,6 +26,7 @@ include(
     ":provider:contract",
     ":provider:foundation",
     ":provider:google-native",
+    ":provider:icloud",
     ":feature:library",
     ":feature:backup",
     ":feature:settings",
