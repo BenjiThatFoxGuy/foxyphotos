@@ -7,8 +7,9 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 
 class MockWebServer(
-    private val responses: List<Int>,
+    responses: List<Int>,
 ) {
+    private val responseQueue = responses.toMutableList()
     val server = MockWebServer()
     val client = OkHttpClient()
     var requestCount = 0
@@ -18,11 +19,13 @@ class MockWebServer(
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 requestCount++
-                val response = if (responses.isEmpty()) {
+                val response = if (responseQueue.isEmpty()) {
                     MockResponse().setResponseCode(200).setBody("not-found")
                 } else {
-                    responses.removeAt(0).let { code ->
-                        MockResponse().setResponseCode(code).setBody("initial-response")
+                    responseQueue.removeAt(0).let { code ->
+                        MockResponse().setResponseCode(code).setBody(
+                            if (code in 200..299) "retry-success" else "retryable-response",
+                        )
                     }
                 }
                 return response

@@ -29,10 +29,10 @@ data class ProviderError(
 @kotlin.jvm.JvmInline
 value class HttpStatus(val value: Int)
 
-class HttpClient(
-    private val client: okhttp3.OkHttpClient,
+open class HttpClient(
+    protected val client: okhttp3.OkHttpClient,
 ) {
-    suspend fun execute(request: okhttp3.Request): okhttp3.Response {
+    open suspend fun execute(request: okhttp3.Request): okhttp3.Response {
         return withContext(Dispatchers.IO) {
             client.newCall(request).execute()
         }
@@ -45,19 +45,19 @@ class RetryableHttpClient(
 ) : HttpClient(client) {
     override suspend fun execute(request: okhttp3.Request): okhttp3.Response {
         var attempt = 0
-        var lastResponse: okhttp3.Response? = null
         while (attempt < maxAttempts) {
             val response = HttpClient(client).execute(request)
             if (response.isSuccessful || !isRetryableStatus(response.code)) {
                 return response
             }
-            response.close()
             attempt++
-            if (attempt < maxAttempts) {
-                kotlinx.coroutines.delay(calculateBackoff(attempt))
+            if (attempt == maxAttempts) {
+                return response
             }
+            response.close()
+            kotlinx.coroutines.delay(calculateBackoff(attempt))
         }
-        return lastResponse ?: throw IllegalStateException("No response after retries")
+        throw IllegalStateException("No response after retries")
     }
 
     private fun isRetryableStatus(code: Int): Boolean = code in setOf(429, 500, 502, 503, 504)

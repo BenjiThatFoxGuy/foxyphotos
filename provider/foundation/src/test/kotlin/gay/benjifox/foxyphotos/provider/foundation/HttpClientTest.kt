@@ -1,23 +1,23 @@
 package gay.benjifox.foxyphotos.provider.foundation
 
-import okhttp3.MediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
+import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Request
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HttpClientTest {
     @Test
-    fun `retries 503 and returns success response`() {
+    fun `retries 503 and returns success response`() = runBlocking {
         val mockWebServer = MockWebServer(listOf(503, 200))
         val client = RetryableHttpClient(mockWebServer.client, maxAttempts = 3)
 
         val response = client.execute(
             Request.Builder()
                 .url(mockWebServer.url("/"))
-                .post("retry".toRequestBody(MediaType.get("text/plain")))
+                .post("retry".toRequestBody("text/plain".toMediaType()))
                 .build(),
         )
 
@@ -28,7 +28,7 @@ class HttpClientTest {
     }
 
     @Test
-    fun `returns 401 without retry`() {
+    fun `returns 401 without retry`() = runBlocking {
         val mockWebServer = MockWebServer(listOf(401))
         val client = RetryableHttpClient(mockWebServer.client, maxAttempts = 3)
 
@@ -44,8 +44,8 @@ class HttpClientTest {
     }
 
     @Test
-    fun `retries on timeout`() {
-        val mockWebServer = MockWebServer(listOf(503))
+    fun `returns final retryable response after exhausting attempts`() = runBlocking {
+        val mockWebServer = MockWebServer(listOf(503, 503, 503))
         val client = RetryableHttpClient(mockWebServer.client, maxAttempts = 3)
 
         val response = client.execute(
@@ -56,6 +56,7 @@ class HttpClientTest {
         )
 
         assertEquals(503, response.code)
+        assertEquals(3, mockWebServer.requestCount)
         mockWebServer.shutdown()
     }
 }
