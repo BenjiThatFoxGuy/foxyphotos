@@ -2,6 +2,7 @@ package gay.benjifox.foxyphotos.provider.google
 
 import gay.benjifox.foxyphotos.provider.foundation.HttpClient
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -10,9 +11,32 @@ import okhttp3.Response
 
 class GoogleAuthClient {
     private val httpClient = HttpClient(OkHttpClient())
+    private var cachedBearer: GoogleBearerToken? = null
+    private var cachedCredentialFingerprint: ByteArray? = null
 
-    suspend fun exchange(credential: GoogleCredential): GoogleBearerToken =
-        parseAuthResponse(httpClient.execute(createAuthRequest(credential)), credential)
+    suspend fun exchange(credential: GoogleCredential): GoogleBearerToken {
+        val credentialFingerprint = fingerprint(credential)
+        cachedBearer?.takeIf {
+            it.isUsableAt(System.currentTimeMillis() / 1_000) &&
+                cachedCredentialFingerprint?.contentEquals(credentialFingerprint) == true
+        }?.let { return it }
+
+        val freshBearer = parseAuthResponse(httpClient.execute(createAuthRequest(credential)), credential)
+        cachedBearer = freshBearer
+        cachedCredentialFingerprint = credentialFingerprint
+        return freshBearer
+    }
+
+    fun clearCachedSession() {
+        cachedBearer = null
+        cachedCredentialFingerprint = null
+    }
+
+    private fun fingerprint(credential: GoogleCredential): ByteArray {
+        val canonicalForm = credential.authRequestFields()
+            .joinToString("&") { (name, value) -> "$name=$value" }
+        return MessageDigest.getInstance("SHA-256").digest(canonicalForm.toByteArray(StandardCharsets.UTF_8))
+    }
 
     private fun createAuthRequest(credential: GoogleCredential): Request {
         val formBody = FormBody.Builder().apply {
@@ -87,6 +111,9 @@ class GoogleBearerToken internal constructor(
 ) {
     @JvmSynthetic
     internal fun authorizationHeader(): String = "Bearer $bearerToken"
+
+    @JvmSynthetic
+    internal fun isUsableAt(epochSeconds: Long): Boolean = expiresAtEpochSeconds > epochSeconds
 
     override fun toString(): String = "GoogleBearerToken(expiresAtEpochSeconds=$expiresAtEpochSeconds)"
 }
