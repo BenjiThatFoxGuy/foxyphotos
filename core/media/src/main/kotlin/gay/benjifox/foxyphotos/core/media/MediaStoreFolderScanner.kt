@@ -3,6 +3,7 @@ package gay.benjifox.foxyphotos.core.media
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.MediaStore
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -20,6 +21,12 @@ data class LocalMedia(
     val sizeBytes: Long,
     val modifiedEpochSeconds: Long,
     val relativePath: String,
+)
+
+data class HashedMedia(
+    val media: LocalMedia,
+    val sha1: ByteArray,
+    val sha256: ByteArray,
 )
 
 class MediaStoreFolderScanner(
@@ -40,6 +47,21 @@ class MediaStoreFolderScanner(
             scanMediaCollection(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, selectedFolders, this)
             scanMediaCollection(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, selectedFolders, this)
         }.sortedBy(LocalMedia::modifiedEpochSeconds)
+    }
+
+    suspend fun hash(media: LocalMedia): HashedMedia = withContext(Dispatchers.IO) {
+        val sha1 = MessageDigest.getInstance("SHA-1")
+        val sha256 = MessageDigest.getInstance("SHA-256")
+        contentResolver.openInputStream(media.uri)?.use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                sha1.update(buffer, 0, read)
+                sha256.update(buffer, 0, read)
+            }
+        } ?: throw IllegalStateException("Selected media is no longer readable.")
+        HashedMedia(media, sha1.digest(), sha256.digest())
     }
 
     private fun scanMediaCollection(
