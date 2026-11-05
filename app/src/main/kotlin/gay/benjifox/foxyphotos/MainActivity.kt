@@ -119,7 +119,11 @@ private fun FoxyPhotosApp() {
                     Text(activityStatus)
                     if (configuredAccount != null) {
                         Text(
-                            text = if (paused) "Backup paused · ${selectedFolders.size} folders selected" else "Ready to back up · ${selectedFolders.size} folders selected",
+                            text = if (paused) {
+                                "Backup paused · ${selectedFolders.size} folders selected"
+                            } else {
+                                "Folders selected · upload drain is not connected yet"
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -170,7 +174,11 @@ private fun FoxyPhotosApp() {
                         Button(onClick = {
                             paused = !paused
                             preferences.edit().putBoolean("paused", paused).apply()
-                            activityStatus = if (paused) "Backup paused by you" else "Ready to back up selected folders"
+                            activityStatus = if (paused) {
+                                "Backup paused by you"
+                            } else {
+                                "Folder selection resumed · upload drain is not connected yet"
+                            }
                         }) { Text(if (paused) "Resume backup" else "Pause backup") }
                     }
                 }
