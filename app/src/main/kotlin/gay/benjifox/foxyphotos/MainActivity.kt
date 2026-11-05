@@ -69,6 +69,7 @@ private fun FoxyPhotosApp() {
     var folders by remember { mutableStateOf<List<MediaFolder>>(emptyList()) }
     var selectedFolders by remember { mutableStateOf(preferences.getStringSet("enabled-folders", emptySet()) ?: emptySet()) }
     var paused by remember { mutableStateOf(preferences.getBoolean("paused", true)) }
+    var activityStatus by remember { mutableStateOf("Waiting for setup") }
     var scanError by remember { mutableStateOf<String?>(null) }
 
     fun persistFolders(value: Set<String>) {
@@ -78,13 +79,16 @@ private fun FoxyPhotosApp() {
     fun scanFolders() {
         scope.launch {
             try {
+                activityStatus = "Scanning local folders"
                 folders = scanner.scan()
                 scanError = null
                 if (selectedFolders.isEmpty() && folders.isNotEmpty()) {
                     persistFolders(folders.map(MediaFolder::relativePath).toSet())
                 }
+                activityStatus = "Scan complete · ${folders.sumOf(MediaFolder::itemCount)} local items in ${folders.size} folders"
             } catch (error: SecurityException) {
                 scanError = "Photo permission is required to scan folders."
+                activityStatus = "Waiting for photo permission"
             }
         }
     }
@@ -109,6 +113,18 @@ private fun FoxyPhotosApp() {
                 configuredAccount?.let { "Google Photos · $it" } ?: "Set up your Google destination",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Current status", style = MaterialTheme.typography.titleMedium)
+                    Text(activityStatus)
+                    if (configuredAccount != null) {
+                        Text(
+                            text = if (paused) "Backup paused · ${selectedFolders.size} folders selected" else "Ready to back up · ${selectedFolders.size} folders selected",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
 
             if (configuredAccount == null) {
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -131,6 +147,7 @@ private fun FoxyPhotosApp() {
                                     googleAuthClient.exchange(parsed)
                                     credentialStore.saveCredential(CredentialReference("google-native"), secret)
                                     configuredAccount = parsed.accountEmail
+                                    activityStatus = "Google credential validated · scan folders to choose backup sources"
                                     credentialInput = ""
                                 } catch (error: GoogleAuthenticationException) {
                                     setupError = error.message ?: "Google could not validate that credential."
@@ -153,6 +170,7 @@ private fun FoxyPhotosApp() {
                         Button(onClick = {
                             paused = !paused
                             preferences.edit().putBoolean("paused", paused).apply()
+                            activityStatus = if (paused) "Backup paused by you" else "Ready to back up selected folders"
                         }) { Text(if (paused) "Resume backup" else "Pause backup") }
                     }
                 }
