@@ -33,6 +33,9 @@ key.properties
 local.version.marker
 app/local.version.marker
 
+# Release automation Python bytecode
+__pycache__/
+
 # OS files
 .DS_Store
 Thumbs.db

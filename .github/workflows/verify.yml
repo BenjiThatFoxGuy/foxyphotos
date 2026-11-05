@@ -5,6 +5,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: read
@@ -66,12 +67,23 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build and test
+        env:
+          BUILD_EVENT: ${{ github.event_name }}
         run: |
-          TASKS="check assembleDebug"
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+          TASKS="check"
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            TASKS="$TASKS assembleDebug"
+          fi
+          if [[ "$BUILD_EVENT" != "pull_request" ]]; then
             TASKS="$TASKS assembleRelease"
           fi
           ./gradlew $TASKS --stacktrace
+
+      - name: Test release automation
+        run: python3 -m unittest discover -s .github/tests -v
+
+      - name: Verify APK versions and package IDs
+        run: python3 .github/verify-apks.py
 
       - name: Reproducible build report
         run: |
@@ -89,6 +101,7 @@ jobs:
           retention-days: 14
 
       - name: Upload debug APK
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: FoxyPhotos-debug-${{ github.sha }}
@@ -113,5 +126,33 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/**/*.apk
+
+  publish:
+    name: Publish immutable tag release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download this run's signed APK
+        uses: actions/download-artifact@v4
+        with:
+          name: FoxyPhotos-release-${{ github.sha }}
+          path: app/build/outputs/apk/release
+      - name: Verify provenance before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh attestation verify app/build/outputs/apk/release/app-release.apk
+          --repo "$GITHUB_REPOSITORY"
+          --source-digest "$GITHUB_SHA"
+          --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/verify.yml"
+      - name: Upload to draft, verify APK digest, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/publish-release.py

@@ -2,8 +2,8 @@
 # Generate a reproducible-build report for FoxyPhotos CI.
 #
 # Emits a JSON report capturing the exact source revision, toolchain and
-# artifact hashes for a build. This lets a reviewer confirm that a published
-# APK was produced by the stated commit with the pinned toolchain.
+# artifact hashes for a build. Origin is verified separately by attestations;
+# this report alone is not proof of origin or bit-for-bit reproducibility.
 #
 # Every gradle invocation is best-effort: the report must never fail a build.
 set -euo pipefail
@@ -24,11 +24,18 @@ fi
 
 JDK_VER="$(java -version 2>&1 | head -n 1)"
 
-# Best-effort fingerprint of the resolved dependency graph.
-DEP_FP="$(./gradlew -q :app:dependencies --configuration runtimeClasspath 2>/dev/null \
-  | sort | sha256sum | cut -d' ' -f1 || true)"
-if [[ -z "$DEP_FP" ]]; then
-  DEP_FP="unavailable"
+# Best-effort fingerprint of the resolved Android variant dependency graph.
+DEP_CONFIG="releaseRuntimeClasspath"
+if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+  DEP_CONFIG="debugRuntimeClasspath"
+fi
+DEP_FILE="$(mktemp)"
+trap 'rm -f "$DEP_FILE"' EXIT
+DEP_FP="unavailable"
+if ./gradlew -q :app:dependencies --configuration "$DEP_CONFIG" > "$DEP_FILE" 2>/dev/null; then
+  if ! grep -q 'FAILED' "$DEP_FILE"; then
+    DEP_FP="$(sort "$DEP_FILE" | sha256sum | cut -d' ' -f1)"
+  fi
 fi
 
 APK_DEBUG="app/build/outputs/apk/debug/app-debug.apk"
@@ -46,12 +53,14 @@ fi
 REPORT="$(python3 - "$GIT_SHA" "$GIT_REF" "$GIT_TAG" "$GRADLE_VER" "$JDK_VER" \
   "$DEP_FP" "$APK_DEBUG_SHA" "$APK_RELEASE_SHA" <<'PY'
 import json
+import os
 import sys
 
 git_sha, git_ref, git_tag, gradle, jdk, dep, debug_sha, release_sha = sys.argv[1:9]
 print(json.dumps({
     "project": "foxyphotos",
-    "reproducible": True,
+    "reproducibility_verified": False,
+    "version_code": os.environ.get("GITHUB_RUN_NUMBER"),
     "commit": git_sha,
     "ref": git_ref,
     "tag": git_tag,

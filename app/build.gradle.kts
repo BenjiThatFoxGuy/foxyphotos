@@ -20,10 +20,8 @@ android {
         minSdk = 29
         targetSdk = 36
 
-        // versionCode: in CI this is the GitHub Actions run number, which is
-        // monotonically increasing across every build of this project. That
-        // guarantees the installed APK is never reported as a downgrade.
-        // Locally we keep a small marker file and increment the same way.
+        // Nightlies and tags use one workflow's rolling run number. Re-running
+        // a run preserves its code; local markers are separate from CI.
         versionCode = getVersionCode()
         // versionName: human facing version comes from the git tag, so a tagged
         // release "v0.1" produces versionName "0.1" (nightlies fall back to the
@@ -81,10 +79,14 @@ dependencies {
 }
 
 private fun getVersionCode(): Int {
-    // CI run number is globally monotonically increasing, so it is the cleanest
-    // versionCode by construction and never collides with a previous release.
-    val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
-    return githubRunNumber ?: getLocalVersionCode()
+    val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")
+    if (githubRunNumber != null) {
+        return githubRunNumber.toInt().also {
+            require(it in 1..2_100_000_000) { "Invalid Android versionCode: $it" }
+        }
+    }
+    check(System.getenv("CI") != "true") { "CI requires GITHUB_RUN_NUMBER" }
+    return getLocalVersionCode()
 }
 
 private fun getLocalVersionCode(): Int {
@@ -100,7 +102,7 @@ private fun getVersionName(): String {
     // refs/tags/v0.1  ->  "0.1"
     val tag = githubRef?.takeIf { it.startsWith("refs/tags/") }?.removePrefix("refs/tags/")
     if (!tag.isNullOrEmpty()) return tag.removePrefix("v")
-    val versionFile = file("VERSION")
+    val versionFile = rootProject.file("VERSION")
     val raw = versionFile.takeIf { it.exists() }?.readText()?.trim().orEmpty()
     return raw.removePrefix("v").ifBlank { "0.1" }
 }
