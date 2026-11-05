@@ -3,5 +3,6 @@ plugins {
 }
 
 dependencies {
+    implementation(libs.okhttp)
     testImplementation(libs.junit)
 }
