@@ -16,33 +16,47 @@ import okhttp3.Response
 import okio.BufferedSink
 
 /** Real bclone/gotohp-compatible Google Photos upload sequence for one original file. */
-class GoogleNativeUploadClient {
-    private val httpClient = OkHttpClient()
-    private val authClient = GoogleAuthClient()
+class GoogleNativeUploadClient internal constructor(
+    private val diagnostics: UploadDiagnosticSink,
+    private val httpClient: OkHttpClient,
+    private val authorization: suspend (GoogleCredential) -> String,
+    private val retryDelay: suspend (Long) -> Unit,
+) {
+    constructor(diagnostics: UploadDiagnosticSink = UploadDiagnosticSink {}) : this(
+        diagnostics, OkHttpClient(), cachedAuthorization(), { delay(it) },
+    )
 
-    suspend fun upload(request: GoogleUploadRequest): GoogleUploadOutcome {
-        require(request.sizeBytes > 0) { "Google Photos cannot upload an empty file." }
-        require(request.sha1.size == SHA1_LENGTH) { "A SHA-1 digest is required for Google duplicate detection." }
+    suspend fun upload(request: GoogleUploadRequest): GoogleUploadOutcome = withContext(Dispatchers.IO) {
+        val trace = UploadDiagnosticTrace(diagnostics, request.fileType, request.sizeBytes)
+        trace.step(UploadStage.UPLOAD) {
+            require(request.sizeBytes > 0) { "Google Photos cannot upload an empty file." }
+            require(request.sha1.size == SHA1_LENGTH) { "A SHA-1 digest is required for Google duplicate detection." }
 
-        val authorization = authClient.exchange(request.credential).authorizationHeader()
-        val existingKey = checkExisting(request.sha1, authorization)
-        if (existingKey != null) return GoogleUploadOutcome.Present(existingKey)
+            val authorization = trace.step(UploadStage.AUTH) { authorization(request.credential) }
+            val existingKey = trace.step(UploadStage.HASH_CHECK) { checkExisting(request.sha1, authorization, trace) }
+            if (existingKey != null) {
+                trace.event(UploadStage.UPLOAD, UploadAction.PRESENT)
+                return@step GoogleUploadOutcome.Present(existingKey)
+            }
 
-        val uploadToken = acquireUploadToken(request.sha1, request.sizeBytes, authorization)
-        val commitToken = uploadBytes(uploadToken, request, authorization)
-        val mediaKey = commitUpload(commitToken, request, authorization)
-        return GoogleUploadOutcome.Committed(mediaKey)
+            val uploadToken = trace.step(UploadStage.UPLOAD_TOKEN) { acquireUploadToken(request.sha1, request.sizeBytes, authorization, trace) }
+            val commitToken = uploadBytes(uploadToken, request, authorization, trace)
+            val mediaKey = commitUpload(commitToken, request, authorization, trace)
+            GoogleUploadOutcome.Committed(mediaKey)
+        }
     }
 
-    private suspend fun checkExisting(sha1: ByteArray, authorization: String): String? =
+    private suspend fun checkExisting(sha1: ByteArray, authorization: String, trace: UploadDiagnosticTrace): String? =
         postProtobuf(
             endpoint = GoogleNativeProtocol.hashCheckEndpoint,
             body = GoogleNativeProtocol.encodeHashCheck(sha1),
             authorization = authorization,
             extendedHeaders = false,
+            trace = trace,
+            stage = UploadStage.HASH_CHECK,
         ).let(GoogleNativeProtocol::decodeExistingMediaKey)
 
-    private suspend fun acquireUploadToken(sha1: ByteArray, sizeBytes: Long, authorization: String): String {
+    private suspend fun acquireUploadToken(sha1: ByteArray, sizeBytes: Long, authorization: String, trace: UploadDiagnosticTrace): String {
         val request = Request.Builder()
             .url(GoogleNativeProtocol.uploadEndpoint)
             .post(GoogleNativeProtocol.encodeUploadTokenRequest(sizeBytes).toRequestBody(PROTOBUF))
@@ -53,7 +67,7 @@ class GoogleNativeUploadClient {
             .header("X-Goog-Hash", "sha1=${Base64.getEncoder().encodeToString(sha1)}")
             .header("X-Upload-Content-Length", sizeBytes.toString())
             .build()
-        return execute(request).use { response ->
+        return execute(request, trace, UploadStage.UPLOAD_TOKEN).use { response ->
             requireSuccess(response, "Google rejected the upload-token request.")
             response.header("X-GUploader-UploadID")?.takeIf(String::isNotBlank)
                 ?: throw GoogleUploadException("Google upload-token response was incomplete.")
@@ -64,7 +78,8 @@ class GoogleNativeUploadClient {
         uploadToken: String,
         request: GoogleUploadRequest,
         authorization: String,
-    ): GoogleCommitToken = retrySideEffectingRequest {
+        trace: UploadDiagnosticTrace,
+    ): GoogleCommitToken = retrySideEffectingRequest(trace, UploadStage.MEDIA_BYTES) { attempt ->
         val url = "${GoogleNativeProtocol.uploadEndpoint}?upload_id=$uploadToken"
         val byteRequest = Request.Builder()
             .url(url)
@@ -74,7 +89,7 @@ class GoogleNativeUploadClient {
             .header("User-Agent", PHOTOS_USER_AGENT)
             .header("Authorization", authorization)
             .build()
-        execute(byteRequest).use { response ->
+        execute(byteRequest, trace, UploadStage.MEDIA_BYTES, attempt).use { response ->
             requireSuccess(response, "Google rejected the media bytes.")
             GoogleNativeProtocol.decodeCommitToken(readBody(response))
         }
@@ -84,7 +99,8 @@ class GoogleNativeUploadClient {
         token: GoogleCommitToken,
         request: GoogleUploadRequest,
         authorization: String,
-    ): String = retrySideEffectingRequest {
+        trace: UploadDiagnosticTrace,
+    ): String = retrySideEffectingRequest(trace, UploadStage.COMMIT) { attempt ->
         val body = GoogleNativeProtocol.encodeCommitRequest(
             token = token,
             fileName = request.fileName,
@@ -96,6 +112,9 @@ class GoogleNativeUploadClient {
             body = body,
             authorization = authorization,
             extendedHeaders = true,
+            trace = trace,
+            stage = UploadStage.COMMIT,
+            attempt = attempt,
         ).let(GoogleNativeProtocol::decodeCommittedMediaKey)
     }
 
@@ -104,6 +123,9 @@ class GoogleNativeUploadClient {
         body: ByteArray,
         authorization: String,
         extendedHeaders: Boolean,
+        trace: UploadDiagnosticTrace,
+        stage: UploadStage,
+        attempt: Int = 1,
     ): ByteArray {
         val request = Request.Builder()
             .url(endpoint)
@@ -119,17 +141,21 @@ class GoogleNativeUploadClient {
                 }
             }
             .build()
-        return execute(request).use { response ->
+        return execute(request, trace, stage, attempt).use { response ->
             requireSuccess(response, "Google rejected the provider request.")
-            readBody(response)
+            readBody(response).also {
+                if (stage == UploadStage.COMMIT) {
+                    trace.event(stage, UploadAction.HTTP_RESPONSE, attempt, response.code, CommitResponseShape.summarize(it))
+                }
+            }
         }
     }
 
-    private suspend fun <T> retrySideEffectingRequest(block: suspend () -> T): T {
+    private suspend fun <T> retrySideEffectingRequest(trace: UploadDiagnosticTrace, stage: UploadStage, block: suspend (Int) -> T): T {
         var lastFailure: Throwable? = null
         repeat(MAX_SIDE_EFFECTING_ATTEMPTS) { attempt ->
             try {
-                return block()
+                return trace.step(stage, attempt + 1) { block(attempt + 1) }
             } catch (failure: GoogleHttpException) {
                 if (!failure.retryable || attempt == MAX_SIDE_EFFECTING_ATTEMPTS - 1) throw failure
                 lastFailure = failure
@@ -139,13 +165,14 @@ class GoogleNativeUploadClient {
                 }
                 lastFailure = failure
             }
-            delay(RETRY_DELAYS_MILLIS[attempt])
+            trace.event(stage, UploadAction.RETRY, attempt + 1)
+            retryDelay(RETRY_DELAYS_MILLIS[attempt])
         }
         throw GoogleUploadException("Google upload failed.", lastFailure)
     }
 
-    private suspend fun execute(request: Request): Response = withContext(Dispatchers.IO) {
-        httpClient.newCall(request).execute()
+    private suspend fun execute(request: Request, trace: UploadDiagnosticTrace, stage: UploadStage, attempt: Int = 1): Response = withContext(Dispatchers.IO) {
+        httpClient.newCall(request).execute().also { trace.event(stage, UploadAction.HTTP_RESPONSE, attempt, it.code) }
     }
 
     private fun requireSuccess(response: Response, message: String) {
@@ -166,6 +193,11 @@ class GoogleNativeUploadClient {
     }
 
     private companion object {
+        fun cachedAuthorization(): suspend (GoogleCredential) -> String {
+            val authClient = GoogleAuthClient()
+            return { credential -> authClient.exchange(credential).authorizationHeader() }
+        }
+
         val PROTOBUF = "application/x-protobuf".toMediaType()
         const val DEFAULT_LANGUAGE = "en_US"
         const val PHOTOS_USER_AGENT = "Google Photos/49029607 (Pixel XL; Android 9)"
@@ -183,6 +215,7 @@ data class GoogleUploadRequest(
     val modifiedEpochSeconds: Long,
     val sha1: ByteArray,
     val openSource: () -> InputStream,
+    val fileType: UploadFileType = UploadFileType.OTHER,
 )
 
 sealed interface GoogleUploadOutcome {
@@ -213,7 +246,7 @@ class GoogleUploadException(message: String, cause: Throwable? = null) : Illegal
 
 class GoogleUploadUncertainException(message: String, cause: Throwable) : IllegalStateException(message, cause)
 
-private class GoogleHttpException(
+internal class GoogleHttpException(
     message: String,
     val statusCode: Int,
     val retryable: Boolean,

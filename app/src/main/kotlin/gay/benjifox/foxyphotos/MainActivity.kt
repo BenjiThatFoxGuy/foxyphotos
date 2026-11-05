@@ -9,7 +9,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +22,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +40,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -51,6 +60,10 @@ import gay.benjifox.foxyphotos.provider.google.GoogleUploadRequest
 import gay.benjifox.foxyphotos.provider.google.GoogleUploadUncertainException
 import java.io.IOException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import gay.benjifox.foxyphotos.provider.google.UploadFileType
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,7 +81,10 @@ private fun FoxyPhotosApp() {
     val credentialStore = remember { AndroidKeystoreCredentialStore(context.applicationContext) }
     val uploadedContentLedger = remember { SharedPreferencesUploadedContentLedger(context.applicationContext) }
     val googleAuthClient = remember { GoogleAuthClient() }
-    val googleUploadClient = remember { GoogleNativeUploadClient() }
+    val diagnostics = remember { AppDiagnostics.get(context) }
+    val googleUploadClient = remember { GoogleNativeUploadClient(diagnostics) }
+    var showLogs by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
     val scanner = remember { MediaStoreFolderScanner(context.contentResolver) }
     val scope = rememberCoroutineScope()
     var credentialInput by remember { mutableStateOf("") }
@@ -147,6 +163,10 @@ private fun FoxyPhotosApp() {
                         return@forEachIndexed
                     }
                     activityStatus = "Backing up ${index + 1} of ${media.size} · ${item.displayName}"
+                    val diagnosticFileType = withContext(Dispatchers.IO) {
+                        try { UploadFileType.fromMimeType(context.contentResolver.getType(item.uri)) }
+                        catch (_: Exception) { UploadFileType.OTHER }
+                    }
                     when (val result = googleUploadClient.upload(
                         GoogleUploadRequest(
                             credential = credential,
@@ -154,6 +174,7 @@ private fun FoxyPhotosApp() {
                             sizeBytes = item.sizeBytes,
                             modifiedEpochSeconds = item.modifiedEpochSeconds,
                             sha1 = hashed.sha1,
+                            fileType = diagnosticFileType,
                             openSource = {
                                 context.contentResolver.openInputStream(item.uri)
                                     ?: throw IllegalStateException("Selected media is no longer readable.")
@@ -173,8 +194,10 @@ private fun FoxyPhotosApp() {
                 activityStatus = "Backup complete · $uploaded uploaded · $skipped already present"
             } catch (_: GoogleUploadUncertainException) {
                 activityStatus = "Could not confirm the last upload · it will be checked again before retrying"
-            } catch (error: Exception) {
-                activityStatus = error.message ?: "Backup stopped with an unexpected error"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                activityStatus = "backup stopped; open View logs... for diagnostic details"
             } finally {
                 secret.fill(0)
             }
@@ -192,12 +215,35 @@ private fun FoxyPhotosApp() {
         if (granted.values.any { it }) scanFolders() else scanError = "Photo permission was not granted."
     }
 
+    if (showLogs) {
+        DiagnosticLogViewer(diagnostics, onClose = { showLogs = false })
+        return
+    }
+
     Scaffold { padding ->
         Column(
             modifier = Modifier.fillMaxSize().background(Color(0xFF101015)).padding(padding).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("FoxyPhotos", style = MaterialTheme.typography.headlineLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        val dotColor = MaterialTheme.colorScheme.onSurface
+                        Canvas(Modifier.size(24.dp).semantics { contentDescription = "More options" }) {
+                            for (fraction in listOf(0.25f, 0.5f, 0.75f)) {
+                                drawCircle(dotColor, radius = 1.8.dp.toPx(), center = Offset(size.width / 2, size.height * fraction))
+                            }
+                        }
+                    }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("View logs...") }, onClick = {
+                            menuExpanded = false
+                            showLogs = true
+                        })
+                    }
+                }
+                Text("FoxyPhotos", style = MaterialTheme.typography.headlineLarge)
+            }
             Text(
                 configuredAccount?.let { "Google Photos · $it" } ?: "Set up your Google destination",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
