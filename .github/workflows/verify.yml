@@ -42,13 +42,44 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
 
+      - name: Prepare release signing
+        if: ${{ secrets.FOXYPHOTOS_KEYSTORE_BASE64 != '' }}
+        env:
+          FOXYPHOTOS_KEYSTORE_BASE64: ${{ secrets.FOXYPHOTOS_KEYSTORE_BASE64 }}
+          FOXYPHOTOS_KEY_ALIAS: ${{ secrets.FOXYPHOTOS_KEY_ALIAS }}
+          FOXYPHOTOS_STORE_PASSWORD: ${{ secrets.FOXYPHOTOS_STORE_PASSWORD }}
+          FOXYPHOTOS_KEY_PASSWORD: ${{ secrets.FOXYPHOTOS_KEY_PASSWORD }}
+        run: |
+          umask 077
+          KEYSTORE_PATH="$RUNNER_TEMP/foxyphotos-release.jks"
+          printf '%s' "$FOXYPHOTOS_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          {
+            echo "FOXYPHOTOS_KEYSTORE_PATH=$KEYSTORE_PATH"
+            echo "FOXYPHOTOS_KEY_ALIAS=$FOXYPHOTOS_KEY_ALIAS"
+            echo "FOXYPHOTOS_STORE_PASSWORD=$FOXYPHOTOS_STORE_PASSWORD"
+            echo "FOXYPHOTOS_KEY_PASSWORD=$FOXYPHOTOS_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       - name: Build and test
         run: ./gradlew check assembleDebug --stacktrace
+
+      - name: Build signed release APK
+        if: ${{ env.FOXYPHOTOS_KEYSTORE_PATH != '' }}
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: FoxyPhotos-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload signed release APK
+        if: ${{ env.FOXYPHOTOS_KEYSTORE_PATH != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: FoxyPhotos-release-${{ github.sha }}
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14

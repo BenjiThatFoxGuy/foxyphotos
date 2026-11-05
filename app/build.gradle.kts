@@ -18,6 +18,24 @@ android {
     buildFeatures {
         compose = true
     }
+
+    signingConfigs {
+        create("release") {
+            val keyStorePath = System.getenv("FOXYPHOTOS_KEYSTORE_PATH")
+            if (keyStorePath != null) {
+                storeFile = file(keyStorePath)
+                storePassword = System.getenv("FOXYPHOTOS_STORE_PASSWORD")
+                keyAlias = System.getenv("FOXYPHOTOS_KEY_ALIAS")
+                keyPassword = System.getenv("FOXYPHOTOS_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
 }
 
 dependencies {
