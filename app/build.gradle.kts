@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,7 +7,7 @@ plugins {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set("17")
+        jvmTarget.set(JvmTarget.JAVA_17)
     }
 }
 
