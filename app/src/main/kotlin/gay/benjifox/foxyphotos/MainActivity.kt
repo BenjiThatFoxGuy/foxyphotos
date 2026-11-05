@@ -252,11 +252,7 @@ private fun FoxyPhotosApp() {
                     Text(activityStatus)
                     if (configuredAccount != null) {
                         Text(
-                            text = if (paused) {
-                                "Backup paused · ${selectedFolders.size} folders selected"
-                            } else {
-                                "Backup running or ready · ${selectedFolders.size} folders selected"
-                            },
+                            text = "${backupStatusLabel(isRunning, paused)} · ${selectedFolders.size} folders selected",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
