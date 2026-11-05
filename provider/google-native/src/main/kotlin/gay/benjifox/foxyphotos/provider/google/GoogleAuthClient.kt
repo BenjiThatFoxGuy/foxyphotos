@@ -53,7 +53,9 @@ class GoogleAuthClient {
         }
 
     private fun readResponseBody(response: Response): String {
-        val source = response.body.byteStream()
+        val source = (response.body ?: throw GoogleAuthenticationException(
+            "Google authentication returned an empty response.",
+        )).byteStream()
         val decodedSource = if (response.header("Content-Encoding")?.contains("gzip", ignoreCase = true) == true) {
             GZIPInputStream(source)
         } else {
