@@ -67,7 +67,7 @@ class GoogleNativeUploadClient internal constructor(
             .header("X-Goog-Hash", "sha1=${Base64.getEncoder().encodeToString(sha1)}")
             .header("X-Upload-Content-Length", sizeBytes.toString())
             .build()
-        return execute(request, trace, UploadStage.UPLOAD_TOKEN).use { response ->
+        return execute(request, trace, UploadStage.UPLOAD_TOKEN) { response ->
             requireSuccess(response, "Google rejected the upload-token request.")
             response.header("X-GUploader-UploadID")?.takeIf(String::isNotBlank)
                 ?: throw GoogleUploadException("Google upload-token response was incomplete.")
@@ -89,7 +89,7 @@ class GoogleNativeUploadClient internal constructor(
             .header("User-Agent", PHOTOS_USER_AGENT)
             .header("Authorization", authorization)
             .build()
-        execute(byteRequest, trace, UploadStage.MEDIA_BYTES, attempt).use { response ->
+        execute(byteRequest, trace, UploadStage.MEDIA_BYTES, attempt) { response ->
             requireSuccess(response, "Google rejected the media bytes.")
             GoogleNativeProtocol.decodeCommitToken(readBody(response))
         }
@@ -141,7 +141,7 @@ class GoogleNativeUploadClient internal constructor(
                 }
             }
             .build()
-        return execute(request, trace, stage, attempt).use { response ->
+        return execute(request, trace, stage, attempt) { response ->
             requireSuccess(response, "Google rejected the provider request.")
             readBody(response).also {
                 if (stage == UploadStage.COMMIT) {
@@ -171,8 +171,12 @@ class GoogleNativeUploadClient internal constructor(
         throw GoogleUploadException("Google upload failed.", lastFailure)
     }
 
-    private suspend fun execute(request: Request, trace: UploadDiagnosticTrace, stage: UploadStage, attempt: Int = 1): Response = withContext(Dispatchers.IO) {
-        httpClient.newCall(request).execute().also { trace.event(stage, UploadAction.HTTP_RESPONSE, attempt, it.code) }
+    private suspend fun <T> execute(
+        request: Request, trace: UploadDiagnosticTrace, stage: UploadStage, attempt: Int = 1,
+        consume: (Response) -> T,
+    ): T = httpClient.newCall(request).consumeCancellable { response ->
+        trace.event(stage, UploadAction.HTTP_RESPONSE, attempt, response.code)
+        consume(response)
     }
 
     private fun requireSuccess(response: Response, message: String) {

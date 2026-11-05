@@ -29,6 +29,11 @@ android {
         versionName = getVersionName()
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED") }
+    }
+
     buildFeatures {
         compose = true
     }
@@ -77,6 +82,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.17")
 }
 
 private fun getVersionCode(): Int {

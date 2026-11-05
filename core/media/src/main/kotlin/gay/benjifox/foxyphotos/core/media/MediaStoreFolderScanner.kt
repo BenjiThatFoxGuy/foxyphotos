@@ -6,6 +6,8 @@ import android.provider.MediaStore
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 data class MediaFolder(
     val relativePath: String,
@@ -55,6 +57,7 @@ class MediaStoreFolderScanner(
         contentResolver.openInputStream(media.uri)?.use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             while (true) {
+                currentCoroutineContext().ensureActive()
                 val read = input.read(buffer)
                 if (read < 0) break
                 sha1.update(buffer, 0, read)
@@ -64,7 +67,7 @@ class MediaStoreFolderScanner(
         HashedMedia(media, sha1.digest(), sha256.digest())
     }
 
-    private fun scanMediaCollection(
+    private suspend fun scanMediaCollection(
         collection: Uri,
         selectedFolders: Set<String>,
         target: MutableList<LocalMedia>,
@@ -83,6 +86,7 @@ class MediaStoreFolderScanner(
             val modified = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val path = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
             while (cursor.moveToNext()) {
+                currentCoroutineContext().ensureActive()
                 val relativePath = cursor.getString(path)?.ifBlank { "Unsorted media" } ?: "Unsorted media"
                 if (relativePath in selectedFolders) {
                     target += LocalMedia(
@@ -97,7 +101,7 @@ class MediaStoreFolderScanner(
         }
     }
 
-    private fun scanCollection(
+    private suspend fun scanCollection(
         collection: android.net.Uri,
         counts: MutableMap<String, Counts>,
         isVideo: Boolean,
@@ -111,6 +115,7 @@ class MediaStoreFolderScanner(
         )?.use { cursor ->
             val pathColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
             while (cursor.moveToNext()) {
+                currentCoroutineContext().ensureActive()
                 val path = cursor.getString(pathColumn)?.ifBlank { "Unsorted media" } ?: "Unsorted media"
                 val count = counts.getOrPut(path, ::Counts)
                 if (isVideo) count.videos++ else count.images++

@@ -18,6 +18,14 @@ Early prototype. The current implementation target is described in [the Android 
 
 A Hub, iCloud Photos support, remote browsing, deletion, and a backend are intentionally out of scope for v0.1.
 
+## Background backups and live status
+
+Starting a backup launches an Android `dataSync` foreground service. Leaving the screen or switching apps does not cancel that run. The app and notification observe the same session; Pause finishes the current item, Resume rescans with confirmed content deduplicated, and Cancel stops the run without marking unconfirmed items backed up.
+
+Android 10-15 use an ordinary progress notification. Android 16 and later request Live Update promotion on that same notification, using native progress styling and compact status text. Promotion depends on system eligibility and user settings. Notification permission denial does not prevent backup; controls remain available in the app.
+
+The service is not automatically restarted after process death or force-stop. Android's foreground-service time limits still apply. Backup session state and orchestration live in `core:backup`, with Android lifecycle, storage, and provider adapters in platform code. The core is currently a Kotlin/JVM module; an iOS target has not yet been configured or verified.
+
 ## Build and release pipeline
 
 One GitHub Actions workflow (`.github/workflows/verify.yml`) owns the build counter:

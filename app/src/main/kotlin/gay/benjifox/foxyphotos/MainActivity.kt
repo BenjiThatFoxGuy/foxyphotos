@@ -46,7 +46,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import gay.benjifox.foxyphotos.core.database.SharedPreferencesUploadedContentLedger
+import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import gay.benjifox.foxyphotos.core.media.MediaFolder
 import gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner
 import gay.benjifox.foxyphotos.core.security.AndroidKeystoreCredentialStore
@@ -54,15 +55,8 @@ import gay.benjifox.foxyphotos.provider.contract.CredentialReference
 import gay.benjifox.foxyphotos.provider.google.GoogleAuthClient
 import gay.benjifox.foxyphotos.provider.google.GoogleAuthenticationException
 import gay.benjifox.foxyphotos.provider.google.GoogleCredentialParser
-import gay.benjifox.foxyphotos.provider.google.GoogleNativeUploadClient
-import gay.benjifox.foxyphotos.provider.google.GoogleUploadOutcome
-import gay.benjifox.foxyphotos.provider.google.GoogleUploadRequest
 import java.io.IOException
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import gay.benjifox.foxyphotos.provider.google.UploadFileType
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,10 +72,8 @@ private fun FoxyPhotosApp() {
         context.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
     }
     val credentialStore = remember { AndroidKeystoreCredentialStore(context.applicationContext) }
-    val uploadedContentLedger = remember { SharedPreferencesUploadedContentLedger(context.applicationContext) }
     val googleAuthClient = remember { GoogleAuthClient() }
     val diagnostics = remember { AppDiagnostics.get(context) }
-    val googleUploadClient = remember { GoogleNativeUploadClient(diagnostics) }
     var showLogs by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     val scanner = remember { MediaStoreFolderScanner(context.contentResolver) }
@@ -91,11 +83,23 @@ private fun FoxyPhotosApp() {
     var setupError by remember { mutableStateOf<String?>(null) }
     var folders by remember { mutableStateOf<List<MediaFolder>>(emptyList()) }
     var selectedFolders by remember { mutableStateOf(preferences.getStringSet("enabled-folders", emptySet()) ?: emptySet()) }
-    var paused by remember { mutableStateOf(preferences.getBoolean("paused", true)) }
+    val backupState by BackupRuntime.state.collectAsStateWithLifecycle()
+    val isRunning = backupState.active
+    val backupCounts = backupState.counts
+    val paused = when (backupState.phase) {
+        BackupPhase.IDLE -> preferences.getBoolean("paused", true)
+        BackupPhase.PAUSING, BackupPhase.PAUSED, BackupPhase.CANCELLED,
+        BackupPhase.TIMED_OUT, BackupPhase.ERRORS -> true
+        else -> false
+    }
     var activityStatus by remember { mutableStateOf("Waiting for setup") }
     var scanError by remember { mutableStateOf<String?>(null) }
-    var isRunning by remember { mutableStateOf(false) }
-    var backupCounts by remember { mutableStateOf(BackupCounts()) }
+    var notificationsEnabled by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        // Permission denial only hides drawer controls, never denies the backup itself.
+        BackupRuntime.command(context, BackupService.START)
+    }
 
     LaunchedEffect(Unit) {
         val savedCredential = credentialStore.loadCredential(CredentialReference("google-native"))
@@ -133,73 +137,12 @@ private fun FoxyPhotosApp() {
         }
     }
     fun runSelectedFolderBackup() {
-        if (isRunning || paused) return
-        isRunning = true
-        backupCounts = BackupCounts()
-        scope.launch {
-            var secret: ByteArray? = null
-            try {
-                val loaded = credentialStore.loadCredential(CredentialReference("google-native"))
-                secret = loaded
-                if (loaded == null) {
-                    activityStatus = "Google credential is missing"
-                    return@launch
-                }
-                val credential = GoogleCredentialParser.parse(loaded.decodeToString())
-                val media = scanner.scanSelectedFolders(selectedFolders)
-                if (media.isEmpty()) {
-                    activityStatus = "No media found in selected folders"
-                    return@launch
-                }
-                var index = 0
-                val result = runBackup(
-                    items = media,
-                    hash = { item ->
-                        index += 1
-                        activityStatus = "Hashing $index of ${media.size} · ${item.displayName}"
-                        scanner.hash(item)
-                    },
-                    isCommitted = { uploadedContentLedger.contains(it.sha256) },
-                    upload = { item, hashed ->
-                        activityStatus = "Backing up $index of ${media.size} · ${item.displayName}"
-                        val diagnosticFileType = withContext(Dispatchers.IO) {
-                            try { UploadFileType.fromMimeType(context.contentResolver.getType(item.uri)) }
-                            catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: Exception) { UploadFileType.OTHER }
-                        }
-                        when (val outcome = googleUploadClient.upload(
-                            GoogleUploadRequest(
-                                credential = credential,
-                                fileName = item.displayName,
-                                sizeBytes = item.sizeBytes,
-                                modifiedEpochSeconds = item.modifiedEpochSeconds,
-                                sha1 = hashed.sha1,
-                                fileType = diagnosticFileType,
-                                openSource = {
-                                    context.contentResolver.openInputStream(item.uri)
-                                        ?: throw IllegalStateException("Selected media is no longer readable.")
-                                },
-                            ),
-                        )) {
-                            is GoogleUploadOutcome.Committed -> BackupUploadResult(outcome.mediaKey)
-                            is GoogleUploadOutcome.Present -> BackupUploadResult(outcome.mediaKey, alreadyPresent = true)
-                        }
-                    },
-                    recordCommitted = { hashed, key -> uploadedContentLedger.recordCommitted(hashed.sha256, key) },
-                    shouldPause = { paused },
-                    onProgress = { backupCounts = it },
-                )
-                activityStatus = result.summary()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // Credential parsing and folder scanning remain run-level failures.
-                activityStatus = "Backup stopped · open View logs... for diagnostic details"
-            } finally {
-                secret?.fill(0)
-                isRunning = false
-            }
-        }
+        if (isRunning) return
+        notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
+                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else BackupRuntime.command(context, BackupService.START)
     }
 
     val requiredPermissions = if (Build.VERSION.SDK_INT >= 33) {
@@ -249,7 +192,8 @@ private fun FoxyPhotosApp() {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Current status", style = MaterialTheme.typography.titleMedium)
-                    Text(activityStatus)
+                    Text(if (backupState.phase == BackupPhase.IDLE) activityStatus else
+                        "${backupState.phase.title} · ${backupCounts.uploaded} uploaded · ${backupCounts.alreadyPresent} already present · ${backupCounts.failed} failed · ${backupCounts.uncertain} uncertain")
                     if (configuredAccount != null) {
                         Text(
                             text = "${backupStatusLabel(isRunning, paused)} · ${selectedFolders.size} folders selected",
@@ -300,16 +244,17 @@ private fun FoxyPhotosApp() {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(if (paused) "Backup paused" else "Backup enabled", style = MaterialTheme.typography.titleMedium)
                         Text("Only enabled folders will be scanned and uploaded.")
-                        Button(onClick = {
-                            paused = !paused
-                            preferences.edit().putBoolean("paused", paused).apply()
-                            if (paused) {
-                                activityStatus = BackupRunResult(backupCounts, paused = true).summary()
-                            } else if (!isRunning) {
-                                activityStatus = "Starting selected-folder backup"
-                                runSelectedFolderBackup()
-                            }
-                        }) { Text(if (paused) "Resume backup" else "Pause backup") }
+                        Button(enabled = backupState.phase != BackupPhase.PAUSING && backupState.phase != BackupPhase.CANCELLING, onClick = {
+                            if (isRunning) BackupRuntime.command(context, BackupService.PAUSE)
+                            else runSelectedFolderBackup()
+                        }) { Text(if (isRunning) "Pause backup" else "Resume backup") }
+                        if (isRunning) {
+                            Button(onClick = { BackupRuntime.command(context, BackupService.CANCEL) }) { Text("Cancel backup") }
+                        }
+                        Text("Started backups continue in the background. Pause finishes the current item; Cancel stops the run.")
+                        if (!notificationsEnabled) {
+                            Text("Notifications are disabled. Backup still runs in the background; use this screen to pause or cancel. Android may show it in Active apps instead.")
+                        }
                         Button(
                             enabled = !isRunning && !paused && selectedFolders.isNotEmpty(),
                             onClick = ::runSelectedFolderBackup,

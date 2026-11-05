@@ -3,8 +3,6 @@ package gay.benjifox.foxyphotos.provider.google
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -22,9 +20,7 @@ class GoogleAuthClient {
                 cachedCredentialFingerprint?.contentEquals(credentialFingerprint) == true
         }?.let { return it }
 
-        val freshBearer = withContext(Dispatchers.IO) {
-            httpClient.newCall(createAuthRequest(credential)).execute()
-        }.let { response ->
+        val freshBearer = httpClient.newCall(createAuthRequest(credential)).consumeCancellable { response ->
             parseAuthResponse(response, credential)
         }
         cachedBearer = freshBearer
