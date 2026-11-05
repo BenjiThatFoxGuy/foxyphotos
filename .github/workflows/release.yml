@@ -1,0 +1,70 @@
+name: Release Android build
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Restore Android SDK cache
+        uses: actions/cache@v4
+        with:
+          path: .android-sdk
+          key: android-sdk-${{ runner.os }}-cmdline-16111833-api-36-build-tools-36.0.0
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: 16111833
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+          accept-android-sdk-licenses: false
+          log-accepted-android-sdk-licenses: false
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Prepare release signing
+        env:
+          FOXYPHOTOS_KEYSTORE_BASE64: ${{ secrets.FOXYPHOTOS_KEYSTORE_BASE64 }}
+          FOXYPHOTOS_KEY_ALIAS: ${{ secrets.FOXYPHOTOS_KEY_ALIAS }}
+          FOXYPHOTOS_STORE_PASSWORD: ${{ secrets.FOXYPHOTOS_STORE_PASSWORD }}
+          FOXYPHOTOS_KEY_PASSWORD: ${{ secrets.FOXYPHOTOS_KEY_PASSWORD }}
+        run: |
+          umask 077
+          KEYSTORE_PATH="$RUNNER_TEMP/foxyphotos-release.jks"
+          printf '%s' "$FOXYPHOTOS_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          {
+            echo "FOXYPHOTOS_KEYSTORE_PATH=$KEYSTORE_PATH"
+            echo "FOXYPHOTOS_KEY_ALIAS=$FOXYPHOTOS_KEY_ALIAS"
+            echo "FOXYPHOTOS_STORE_PASSWORD=$FOXYPHOTOS_STORE_PASSWORD"
+            echo "FOXYPHOTOS_KEY_PASSWORD=$FOXYPHOTOS_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Upload signed release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FoxyPhotos-release-${{ github.ref_name }}
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
