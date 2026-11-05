@@ -86,7 +86,9 @@ internal open class BackupService : Service() {
                 }
             } else notifications.update(state)
         } else {
-            stopForeground(STOP_FOREGROUND_DETACH)
+            // Remove the foreground record before reusing its ID for a normal result.
+            // Detaching can retain system-owned FGS/Live Update dismissal restrictions.
+            stopForeground(STOP_FOREGROUND_REMOVE)
             foreground = false
             if (state.phase == BackupPhase.CANCELLED || state.phase == BackupPhase.TIMED_OUT) notifications.remove()
             else notifications.update(state)

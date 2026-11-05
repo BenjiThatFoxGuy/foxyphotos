@@ -96,6 +96,54 @@ class BackupServiceTest {
         second.destroy()
     }
 
+    @Test fun `dismissing active notification cancels only its run and does not repost`() {
+        val controller = Robolectric.buildService(HeldService::class.java).create()
+        val service = controller.get()
+        service.onStartCommand(intent(BackupService.START), 0, 1)
+        val runId = BackupRuntime.state.value.runId
+        val manager = service.getSystemService(NotificationManager::class.java)
+        val notification = manager.activeNotifications.single().notification
+        val app = shadowOf(RuntimeEnvironment.getApplication())
+        BackupDismissReceiver().onReceive(service, Intent().putExtra(BackupService.RUN_ID, "stale"))
+        assertNull(app.nextStartedService)
+        manager.cancel(BackupNotifications.ID)
+        notification.deleteIntent.send()
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        val cancel = app.nextStartedService
+        assertNotNull("Dismissal must request cancellation, not just hide progress", cancel)
+        assertEquals(BackupService.CANCEL, cancel.action)
+        assertEquals(runId, cancel.getStringExtra(BackupService.RUN_ID))
+        service.onStartCommand(cancel, 0, 2)
+        assertEquals(BackupPhase.CANCELLED, BackupRuntime.state.value.phase)
+        assertTrue(service.cleaned)
+        assertTrue(manager.activeNotifications.isEmpty())
+        controller.destroy()
+    }
+
+    @Test fun `failed run removes foreground record before posting a dismissible result`() {
+        val controller = Robolectric.buildService(FailingService::class.java).create()
+        val service = controller.get()
+        service.onStartCommand(intent(BackupService.START), 0, 1)
+        service.finish.completeExceptionally(java.io.IOException("offline"))
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(BackupPhase.ERRORS, BackupRuntime.state.value.phase)
+        assertTrue("Remove the foreground record, do not detach its live-update flags", shadowOf(service).getNotificationShouldRemoved())
+        val notification = service.getSystemService(NotificationManager::class.java).activeNotifications.single().notification
+        assertEquals(0, notification.flags and (Notification.FLAG_FOREGROUND_SERVICE or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR))
+        assertFalse(notification.extras.getBoolean("android.requestPromotedOngoing"))
+        assertNull(notification.extras.getString(Notification.EXTRA_TEMPLATE))
+        assertTrue(shadowOf(service).isStoppedBySelf)
+        controller.destroy()
+    }
+
+    internal class FailingService : BackupService() {
+        val finish = CompletableDeferred<Unit>()
+        override suspend fun performBackup(progress: (BackupSnapshot) -> Unit, shouldPause: () -> Boolean): BackupRunResult {
+            finish.await()
+            return BackupRunResult(BackupCounts(), false)
+        }
+    }
+
     @Test fun `null restart and stale resume do not start work`() {
         val controller = Robolectric.buildService(HeldService::class.java).create()
         val service = controller.get()

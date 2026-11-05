@@ -82,6 +82,11 @@ internal class BackupNotifications(private val context: Context) {
 
 class BackupDismissReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        BackupNotifications.dismissedRun = intent.getStringExtra(BackupService.RUN_ID)
+        val runId = intent.getStringExtra(BackupService.RUN_ID) ?: return
+        BackupNotifications.dismissedRun = runId
+        val state = BackupRuntime.state.value
+        if (state.active && state.runId == runId) {
+            BackupRuntime.command(context, BackupService.CANCEL)
+        }
     }
 }
