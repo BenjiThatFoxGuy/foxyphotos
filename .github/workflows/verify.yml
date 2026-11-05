@@ -8,6 +8,10 @@ on:
 
 permissions:
   contents: read
+  # Needed to sign and record artifact attestations (Sigstore-backed SLSA
+  # provenance). id-token mints the workload identity, attestations persists it.
+  id-token: write
+  attestations: write
 
 jobs:
   verify:
@@ -100,3 +104,14 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      # Attest build provenance for the artifacts this run produced. GitHub signs
+      # a statement binding each artifact digest to this workflow run, which is
+      # what shows up as the "verified" provenance on the artifact.
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk

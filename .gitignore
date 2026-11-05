@@ -29,6 +29,10 @@ key.properties
 .env.*
 *.log
 
+# Local version marker (incremented by the build script)
+local.version.marker
+app/local.version.marker
+
 # OS files
 .DS_Store
 Thumbs.db
