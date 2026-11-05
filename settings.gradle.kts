@@ -24,6 +24,7 @@ include(
     ":core:backup",
     ":core:security",
     ":provider:contract",
+    ":provider:foundation",
     ":provider:google-native",
     ":feature:library",
     ":feature:backup",
