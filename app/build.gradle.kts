@@ -7,7 +7,7 @@ plugins {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(JvmTarget.JAVA_17)
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
