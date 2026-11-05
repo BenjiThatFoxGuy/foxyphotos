@@ -1,5 +1,6 @@
 package gay.benjifox.foxyphotos.core.backup
 
+import gay.benjifox.foxyphotos.core.model.BackupTaskId
 import gay.benjifox.foxyphotos.core.model.DestinationId
 import gay.benjifox.foxyphotos.core.model.MediaItemId
 import org.junit.Assert.assertEquals
@@ -13,7 +14,11 @@ class BackupTaskPlannerTest {
         val googleDestinationId = DestinationId("google")
         val hubDestinationId = DestinationId("hub")
 
-        val tasks = BackupTaskPlanner().plan(
+        var taskNumber = 0
+        val tasks = BackupTaskPlanner {
+            taskNumber += 1
+            BackupTaskId("task-$taskNumber")
+        }.plan(
             mediaItemId = mediaItemId,
             destinationIds = setOf(googleDestinationId, hubDestinationId),
         )

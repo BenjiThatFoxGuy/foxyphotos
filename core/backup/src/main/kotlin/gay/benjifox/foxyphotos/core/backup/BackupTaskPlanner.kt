@@ -4,10 +4,9 @@ import gay.benjifox.foxyphotos.core.model.BackupTask
 import gay.benjifox.foxyphotos.core.model.BackupTaskId
 import gay.benjifox.foxyphotos.core.model.DestinationId
 import gay.benjifox.foxyphotos.core.model.MediaItemId
-import java.util.UUID
 
 class BackupTaskPlanner(
-    private val nextTaskId: () -> BackupTaskId = { BackupTaskId(UUID.randomUUID().toString()) },
+    private val nextTaskId: () -> BackupTaskId,
 ) {
     fun plan(
         mediaItemId: MediaItemId,
