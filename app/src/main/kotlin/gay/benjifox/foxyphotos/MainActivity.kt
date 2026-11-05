@@ -1,8 +1,14 @@
 package gay.benjifox.foxyphotos
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,14 +16,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -32,134 +35,165 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import gay.benjifox.foxyphotos.core.media.MediaFolder
+import gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner
 import gay.benjifox.foxyphotos.core.security.AndroidKeystoreCredentialStore
 import gay.benjifox.foxyphotos.provider.contract.CredentialReference
+import gay.benjifox.foxyphotos.provider.google.GoogleAuthClient
+import gay.benjifox.foxyphotos.provider.google.GoogleAuthenticationException
 import gay.benjifox.foxyphotos.provider.google.GoogleCredentialParser
+import java.io.IOException
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                FoxyPhotosApp()
-            }
-        }
+        setContent { MaterialTheme(colorScheme = darkColorScheme()) { FoxyPhotosApp() } }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @androidx.compose.runtime.Composable
 private fun FoxyPhotosApp() {
     val context = LocalContext.current
+    val preferences = remember {
+        context.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+    }
     val credentialStore = remember { AndroidKeystoreCredentialStore(context.applicationContext) }
+    val googleAuthClient = remember { GoogleAuthClient() }
+    val scanner = remember { MediaStoreFolderScanner(context.contentResolver) }
     val scope = rememberCoroutineScope()
-    var source by remember { mutableStateOf("All") }
     var credentialInput by remember { mutableStateOf("") }
     var configuredAccount by remember { mutableStateOf<String?>(null) }
     var setupError by remember { mutableStateOf<String?>(null) }
+    var folders by remember { mutableStateOf<List<MediaFolder>>(emptyList()) }
+    var selectedFolders by remember { mutableStateOf(preferences.getStringSet("enabled-folders", emptySet()) ?: emptySet()) }
+    var paused by remember { mutableStateOf(preferences.getBoolean("paused", true)) }
+    var scanError by remember { mutableStateOf<String?>(null) }
 
-    Scaffold { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF101015))
-                .padding(padding)
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Photos", style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    text = configuredAccount?.let { "Google Photos · $it" } ?: "Set up a backup destination",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = if (configuredAccount == null) "Backups are not configured" else "Backup is paused",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = if (configuredAccount == null) {
-                            "Import your Google Photos credential to enable direct backup."
-                        } else {
-                            "Folder selection and the persistent queue are the next setup steps."
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+    fun persistFolders(value: Set<String>) {
+        selectedFolders = value
+        preferences.edit().putStringSet("enabled-folders", value).apply()
+    }
+    fun scanFolders() {
+        scope.launch {
+            try {
+                folders = scanner.scan()
+                scanError = null
+                if (selectedFolders.isEmpty() && folders.isNotEmpty()) {
+                    persistFolders(folders.map(MediaFolder::relativePath).toSet())
                 }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("All", "Google", "Local").forEach { label ->
-                    FilterChip(
-                        selected = source == label,
-                        onClick = { source = label },
-                        label = { Text(label) },
-                    )
-                }
-            }
-
-            if (configuredAccount == null) {
-                OutlinedTextField(
-                    value = credentialInput,
-                    onValueChange = { credentialInput = it; setupError = null },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Google Photos credential") },
-                    supportingText = {
-                        Text("Imported locally. FoxyPhotos never writes it to the database or logs.")
-                    },
-                    isError = setupError != null,
-                )
-                setupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Button(
-                    enabled = credentialInput.isNotBlank(),
-                    onClick = {
-                        scope.launch {
-                            val secret = credentialInput.encodeToByteArray()
-                            try {
-                                val parsed = GoogleCredentialParser.parse(credentialInput)
-                                credentialStore.saveCredential(CredentialReference("google-native"), secret)
-                                configuredAccount = parsed.accountEmail
-                                credentialInput = ""
-                            } catch (error: IllegalArgumentException) {
-                                setupError = error.message ?: "That credential is not valid."
-                            } finally {
-                                secret.fill(0)
-                            }
-                        }
-                    },
-                ) {
-                    Text("Save Google credential")
-                }
-            } else {
-                EmptyLibrary(source)
+            } catch (error: SecurityException) {
+                scanError = "Photo permission is required to scan folders."
             }
         }
     }
-}
+    val requiredPermissions = if (Build.VERSION.SDK_INT >= 33) {
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+    } else {
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { granted ->
+        if (granted.values.any { it }) scanFolders() else scanError = "Photo permission was not granted."
+    }
 
-@androidx.compose.runtime.Composable
-private fun EmptyLibrary(source: String) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
-        modifier = Modifier.fillMaxSize(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+    Scaffold { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().background(Color(0xFF101015)).padding(padding).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("FoxyPhotos", style = MaterialTheme.typography.headlineLarge)
             Text(
-                text = "No local photos scanned yet · $source",
+                configuredAccount?.let { "Google Photos · $it" } ?: "Set up your Google destination",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 12.dp),
             )
+
+            if (configuredAccount == null) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Connect Google Photos", style = MaterialTheme.typography.titleMedium)
+                        Text("FoxyPhotos validates the imported credential with Google before encrypting it locally.")
+                        OutlinedTextField(
+                            value = credentialInput,
+                            onValueChange = { credentialInput = it; setupError = null },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Google Photos credential") },
+                            isError = setupError != null,
+                        )
+                        setupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        Button(enabled = credentialInput.isNotBlank(), onClick = {
+                            scope.launch {
+                                val secret = credentialInput.encodeToByteArray()
+                                try {
+                                    val parsed = GoogleCredentialParser.parse(credentialInput)
+                                    googleAuthClient.exchange(parsed)
+                                    credentialStore.saveCredential(CredentialReference("google-native"), secret)
+                                    configuredAccount = parsed.accountEmail
+                                    credentialInput = ""
+                                } catch (error: GoogleAuthenticationException) {
+                                    setupError = error.message ?: "Google could not validate that credential."
+                                } catch (_: IOException) {
+                                    setupError = "Could not reach Google. Check your connection and try again."
+                                } catch (error: IllegalArgumentException) {
+                                    setupError = error.message ?: "That credential is not valid."
+                                } finally {
+                                    secret.fill(0)
+                                }
+                            }
+                        }) { Text("Validate and save credential") }
+                    }
+                }
+            } else {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (paused) "Backup paused" else "Backup enabled", style = MaterialTheme.typography.titleMedium)
+                        Text("Only enabled folders will be included when backup upload is connected.")
+                        Button(onClick = {
+                            paused = !paused
+                            preferences.edit().putBoolean("paused", paused).apply()
+                        }) { Text(if (paused) "Resume backup" else "Pause backup") }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        val permitted = requiredPermissions.any {
+                            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                        }
+                        if (permitted) scanFolders() else permissionLauncher.launch(requiredPermissions)
+                    }) { Text(if (folders.isEmpty()) "Scan folders" else "Rescan folders") }
+                    Button(enabled = folders.isNotEmpty(), onClick = { persistFolders(emptySet()) }) {
+                        Text("Clear selection")
+                    }
+                }
+                scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                Text("Folders to back up", style = MaterialTheme.typography.titleMedium)
+                if (folders.isEmpty()) {
+                    Text("Scan your device to choose which folders FoxyPhotos may back up.")
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(folders, key = MediaFolder::relativePath) { folder ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Checkbox(
+                                    checked = folder.relativePath in selectedFolders,
+                                    onCheckedChange = { checked ->
+                                        persistFolders(if (checked) selectedFolders + folder.relativePath else selectedFolders - folder.relativePath)
+                                    },
+                                )
+                                Column {
+                                    Text(folder.relativePath)
+                                    Text(
+                                        "${folder.itemCount} items · ${folder.imageCount} photos · ${folder.videoCount} videos",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-        items(emptyList<Int>()) { }
     }
 }

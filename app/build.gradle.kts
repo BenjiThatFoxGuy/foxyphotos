@@ -21,6 +21,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:media"))
     implementation(project(":core:security"))
     implementation(project(":provider:contract"))
     implementation(project(":provider:google-native"))
