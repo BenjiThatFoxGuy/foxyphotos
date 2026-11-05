@@ -2,7 +2,8 @@
 
 ## Product requirements
 
-- Gallery is a native Android Compose experience. No iOS target is introduced.
+- Modern mode is a native Android Compose gallery. No iOS target is introduced.
+- Modern mode is intended to back up selected folders automatically, with pause support. Build the initial gallery first; automatic scheduling and its conditions are a later increment after the interactions are agreed. Conditions to design: Wi-Fi, cellular data, roaming, Data Saver, power saver and charging. Do not present automatic backup as implemented by the initial gallery.
 - Simple mode remains a manual backup tool. A user starts the run; the existing foreground service continues it in the background. Navigation, permission callbacks, folder refresh and mode changes never initiate backup.
 - Setup asks for Gallery or Simple mode. Settings allows switching the saved choice. Existing installations retain Simple mode unless the user chooses otherwise.
 - A corner settings cog opens Settings from either mode. Settings contains mode selection, backup folders, diagnostics and rerun setup.
