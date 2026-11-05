@@ -57,7 +57,6 @@ import gay.benjifox.foxyphotos.provider.google.GoogleCredentialParser
 import gay.benjifox.foxyphotos.provider.google.GoogleNativeUploadClient
 import gay.benjifox.foxyphotos.provider.google.GoogleUploadOutcome
 import gay.benjifox.foxyphotos.provider.google.GoogleUploadRequest
-import gay.benjifox.foxyphotos.provider.google.GoogleUploadUncertainException
 import java.io.IOException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -95,6 +94,8 @@ private fun FoxyPhotosApp() {
     var paused by remember { mutableStateOf(preferences.getBoolean("paused", true)) }
     var activityStatus by remember { mutableStateOf("Waiting for setup") }
     var scanError by remember { mutableStateOf<String?>(null) }
+    var isRunning by remember { mutableStateOf(false) }
+    var backupCounts by remember { mutableStateOf(BackupCounts()) }
 
     LaunchedEffect(Unit) {
         val savedCredential = credentialStore.loadCredential(CredentialReference("google-native"))
@@ -132,74 +133,71 @@ private fun FoxyPhotosApp() {
         }
     }
     fun runSelectedFolderBackup() {
+        if (isRunning || paused) return
+        isRunning = true
+        backupCounts = BackupCounts()
         scope.launch {
-            if (paused) {
-                activityStatus = "Backup is paused"
-                return@launch
-            }
-            val secret = credentialStore.loadCredential(CredentialReference("google-native"))
-            if (secret == null) {
-                activityStatus = "Google credential is missing"
-                return@launch
-            }
+            var secret: ByteArray? = null
             try {
-                val credential = GoogleCredentialParser.parse(secret.decodeToString())
+                val loaded = credentialStore.loadCredential(CredentialReference("google-native"))
+                secret = loaded
+                if (loaded == null) {
+                    activityStatus = "Google credential is missing"
+                    return@launch
+                }
+                val credential = GoogleCredentialParser.parse(loaded.decodeToString())
                 val media = scanner.scanSelectedFolders(selectedFolders)
                 if (media.isEmpty()) {
                     activityStatus = "No media found in selected folders"
                     return@launch
                 }
-                var uploaded = 0
-                var skipped = 0
-                media.forEachIndexed { index, item ->
-                    if (paused) {
-                        activityStatus = "Backup paused after $uploaded uploaded and $skipped skipped"
-                        return@launch
-                    }
-                    activityStatus = "Hashing ${index + 1} of ${media.size} · ${item.displayName}"
-                    val hashed = scanner.hash(item)
-                    if (uploadedContentLedger.contains(hashed.sha256)) {
-                        skipped += 1
-                        return@forEachIndexed
-                    }
-                    activityStatus = "Backing up ${index + 1} of ${media.size} · ${item.displayName}"
-                    val diagnosticFileType = withContext(Dispatchers.IO) {
-                        try { UploadFileType.fromMimeType(context.contentResolver.getType(item.uri)) }
-                        catch (_: Exception) { UploadFileType.OTHER }
-                    }
-                    when (val result = googleUploadClient.upload(
-                        GoogleUploadRequest(
-                            credential = credential,
-                            fileName = item.displayName,
-                            sizeBytes = item.sizeBytes,
-                            modifiedEpochSeconds = item.modifiedEpochSeconds,
-                            sha1 = hashed.sha1,
-                            fileType = diagnosticFileType,
-                            openSource = {
-                                context.contentResolver.openInputStream(item.uri)
-                                    ?: throw IllegalStateException("Selected media is no longer readable.")
-                            },
-                        ),
-                    )) {
-                        is GoogleUploadOutcome.Committed -> {
-                            uploadedContentLedger.recordCommitted(hashed.sha256, result.mediaKey)
-                            uploaded += 1
+                var index = 0
+                val result = runBackup(
+                    items = media,
+                    hash = { item ->
+                        index += 1
+                        activityStatus = "Hashing $index of ${media.size} · ${item.displayName}"
+                        scanner.hash(item)
+                    },
+                    isCommitted = { uploadedContentLedger.contains(it.sha256) },
+                    upload = { item, hashed ->
+                        activityStatus = "Backing up $index of ${media.size} · ${item.displayName}"
+                        val diagnosticFileType = withContext(Dispatchers.IO) {
+                            try { UploadFileType.fromMimeType(context.contentResolver.getType(item.uri)) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { UploadFileType.OTHER }
                         }
-                        is GoogleUploadOutcome.Present -> {
-                            uploadedContentLedger.recordCommitted(hashed.sha256, result.mediaKey)
-                            skipped += 1
+                        when (val outcome = googleUploadClient.upload(
+                            GoogleUploadRequest(
+                                credential = credential,
+                                fileName = item.displayName,
+                                sizeBytes = item.sizeBytes,
+                                modifiedEpochSeconds = item.modifiedEpochSeconds,
+                                sha1 = hashed.sha1,
+                                fileType = diagnosticFileType,
+                                openSource = {
+                                    context.contentResolver.openInputStream(item.uri)
+                                        ?: throw IllegalStateException("Selected media is no longer readable.")
+                                },
+                            ),
+                        )) {
+                            is GoogleUploadOutcome.Committed -> BackupUploadResult(outcome.mediaKey)
+                            is GoogleUploadOutcome.Present -> BackupUploadResult(outcome.mediaKey, alreadyPresent = true)
                         }
-                    }
-                }
-                activityStatus = "Backup complete · $uploaded uploaded · $skipped already present"
-            } catch (_: GoogleUploadUncertainException) {
-                activityStatus = "Could not confirm the last upload · it will be checked again before retrying"
+                    },
+                    recordCommitted = { hashed, key -> uploadedContentLedger.recordCommitted(hashed.sha256, key) },
+                    shouldPause = { paused },
+                    onProgress = { backupCounts = it },
+                )
+                activityStatus = result.summary()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                activityStatus = "backup stopped; open View logs... for diagnostic details"
+                // Credential parsing and folder scanning remain run-level failures.
+                activityStatus = "Backup stopped · open View logs... for diagnostic details"
             } finally {
-                secret.fill(0)
+                secret?.fill(0)
+                isRunning = false
             }
         }
     }
@@ -310,14 +308,14 @@ private fun FoxyPhotosApp() {
                             paused = !paused
                             preferences.edit().putBoolean("paused", paused).apply()
                             if (paused) {
-                                activityStatus = "Backup paused by you"
-                            } else {
+                                activityStatus = BackupRunResult(backupCounts, paused = true).summary()
+                            } else if (!isRunning) {
                                 activityStatus = "Starting selected-folder backup"
                                 runSelectedFolderBackup()
                             }
                         }) { Text(if (paused) "Resume backup" else "Pause backup") }
                         Button(
-                            enabled = !paused && selectedFolders.isNotEmpty(),
+                            enabled = !isRunning && !paused && selectedFolders.isNotEmpty(),
                             onClick = ::runSelectedFolderBackup,
                         ) { Text("Back up selected folders") }
                     }
