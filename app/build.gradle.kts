@@ -3,6 +3,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget = "17"
+    }
+}
+
 android {
     namespace = "gay.benjifox.foxyphotos"
     compileSdk = 36
