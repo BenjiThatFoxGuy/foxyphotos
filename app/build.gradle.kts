@@ -39,6 +39,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:backup"))
+    implementation(project(":core:database"))
     implementation(project(":core:media"))
     implementation(project(":core:security"))
     implementation(project(":provider:contract"))

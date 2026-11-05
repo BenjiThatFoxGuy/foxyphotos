@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import gay.benjifox.foxyphotos.core.database.SharedPreferencesUploadedContentLedger
 import gay.benjifox.foxyphotos.core.media.MediaFolder
 import gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner
 import gay.benjifox.foxyphotos.core.security.AndroidKeystoreCredentialStore
@@ -43,6 +45,10 @@ import gay.benjifox.foxyphotos.provider.contract.CredentialReference
 import gay.benjifox.foxyphotos.provider.google.GoogleAuthClient
 import gay.benjifox.foxyphotos.provider.google.GoogleAuthenticationException
 import gay.benjifox.foxyphotos.provider.google.GoogleCredentialParser
+import gay.benjifox.foxyphotos.provider.google.GoogleNativeUploadClient
+import gay.benjifox.foxyphotos.provider.google.GoogleUploadOutcome
+import gay.benjifox.foxyphotos.provider.google.GoogleUploadRequest
+import gay.benjifox.foxyphotos.provider.google.GoogleUploadUncertainException
 import java.io.IOException
 import kotlinx.coroutines.launch
 
@@ -60,7 +66,9 @@ private fun FoxyPhotosApp() {
         context.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
     }
     val credentialStore = remember { AndroidKeystoreCredentialStore(context.applicationContext) }
+    val uploadedContentLedger = remember { SharedPreferencesUploadedContentLedger(context.applicationContext) }
     val googleAuthClient = remember { GoogleAuthClient() }
+    val googleUploadClient = remember { GoogleNativeUploadClient() }
     val scanner = remember { MediaStoreFolderScanner(context.contentResolver) }
     val scope = rememberCoroutineScope()
     var credentialInput by remember { mutableStateOf("") }
@@ -71,6 +79,21 @@ private fun FoxyPhotosApp() {
     var paused by remember { mutableStateOf(preferences.getBoolean("paused", true)) }
     var activityStatus by remember { mutableStateOf("Waiting for setup") }
     var scanError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val savedCredential = credentialStore.loadCredential(CredentialReference("google-native"))
+        if (savedCredential != null) {
+            try {
+                val parsed = GoogleCredentialParser.parse(savedCredential.decodeToString())
+                configuredAccount = parsed.accountEmail
+                activityStatus = "Saved Google credential · scan folders to choose backup sources"
+            } catch (_: IllegalArgumentException) {
+                activityStatus = "Saved Google credential needs replacement"
+            } finally {
+                savedCredential.fill(0)
+            }
+        }
+    }
 
     fun persistFolders(value: Set<String>) {
         selectedFolders = value
@@ -92,6 +115,72 @@ private fun FoxyPhotosApp() {
             }
         }
     }
+    fun runSelectedFolderBackup() {
+        scope.launch {
+            if (paused) {
+                activityStatus = "Backup is paused"
+                return@launch
+            }
+            val secret = credentialStore.loadCredential(CredentialReference("google-native"))
+            if (secret == null) {
+                activityStatus = "Google credential is missing"
+                return@launch
+            }
+            try {
+                val credential = GoogleCredentialParser.parse(secret.decodeToString())
+                val media = scanner.scanSelectedFolders(selectedFolders)
+                if (media.isEmpty()) {
+                    activityStatus = "No media found in selected folders"
+                    return@launch
+                }
+                var uploaded = 0
+                var skipped = 0
+                media.forEachIndexed { index, item ->
+                    if (paused) {
+                        activityStatus = "Backup paused after $uploaded uploaded and $skipped skipped"
+                        return@launch
+                    }
+                    activityStatus = "Hashing ${index + 1} of ${media.size} · ${item.displayName}"
+                    val hashed = scanner.hash(item)
+                    if (uploadedContentLedger.contains(hashed.sha256)) {
+                        skipped += 1
+                        return@forEachIndexed
+                    }
+                    activityStatus = "Backing up ${index + 1} of ${media.size} · ${item.displayName}"
+                    when (val result = googleUploadClient.upload(
+                        GoogleUploadRequest(
+                            credential = credential,
+                            fileName = item.displayName,
+                            sizeBytes = item.sizeBytes,
+                            modifiedEpochSeconds = item.modifiedEpochSeconds,
+                            sha1 = hashed.sha1,
+                            openSource = {
+                                context.contentResolver.openInputStream(item.uri)
+                                    ?: throw IllegalStateException("Selected media is no longer readable.")
+                            },
+                        ),
+                    )) {
+                        is GoogleUploadOutcome.Committed -> {
+                            uploadedContentLedger.recordCommitted(hashed.sha256, result.mediaKey)
+                            uploaded += 1
+                        }
+                        is GoogleUploadOutcome.Present -> {
+                            uploadedContentLedger.recordCommitted(hashed.sha256, result.mediaKey)
+                            skipped += 1
+                        }
+                    }
+                }
+                activityStatus = "Backup complete · $uploaded uploaded · $skipped already present"
+            } catch (_: GoogleUploadUncertainException) {
+                activityStatus = "Could not confirm the last upload · it will be checked again before retrying"
+            } catch (error: Exception) {
+                activityStatus = error.message ?: "Backup stopped with an unexpected error"
+            } finally {
+                secret.fill(0)
+            }
+        }
+    }
+
     val requiredPermissions = if (Build.VERSION.SDK_INT >= 33) {
         arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
     } else {
@@ -122,7 +211,7 @@ private fun FoxyPhotosApp() {
                             text = if (paused) {
                                 "Backup paused · ${selectedFolders.size} folders selected"
                             } else {
-                                "Folders selected · upload drain is not connected yet"
+                                "Backup running or ready · ${selectedFolders.size} folders selected"
                             },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -170,16 +259,21 @@ private fun FoxyPhotosApp() {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(if (paused) "Backup paused" else "Backup enabled", style = MaterialTheme.typography.titleMedium)
-                        Text("Only enabled folders will be included when backup upload is connected.")
+                        Text("Only enabled folders will be scanned and uploaded.")
                         Button(onClick = {
                             paused = !paused
                             preferences.edit().putBoolean("paused", paused).apply()
-                            activityStatus = if (paused) {
-                                "Backup paused by you"
+                            if (paused) {
+                                activityStatus = "Backup paused by you"
                             } else {
-                                "Folder selection resumed · upload drain is not connected yet"
+                                activityStatus = "Starting selected-folder backup"
+                                runSelectedFolderBackup()
                             }
                         }) { Text(if (paused) "Resume backup" else "Pause backup") }
+                        Button(
+                            enabled = !paused && selectedFolders.isNotEmpty(),
+                            onClick = ::runSelectedFolderBackup,
+                        ) { Text("Back up selected folders") }
                     }
                 }
 
