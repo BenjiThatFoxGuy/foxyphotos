@@ -44,7 +44,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
 
       - name: Prepare release signing
-        if: ${{ secrets.FOXYPHOTOS_KEYSTORE_BASE64 != '' }}
         env:
           FOXYPHOTOS_KEYSTORE_BASE64: ${{ secrets.FOXYPHOTOS_KEYSTORE_BASE64 }}
           FOXYPHOTOS_KEY_ALIAS: ${{ secrets.FOXYPHOTOS_KEY_ALIAS }}
@@ -65,7 +64,6 @@ jobs:
         run: ./gradlew check assembleDebug --stacktrace
 
       - name: Build signed release APK
-        if: ${{ env.FOXYPHOTOS_KEYSTORE_PATH != '' }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload debug APK
@@ -77,7 +75,6 @@ jobs:
           retention-days: 14
 
       - name: Upload signed release APK
-        if: ${{ env.FOXYPHOTOS_KEYSTORE_PATH != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: FoxyPhotos-release-${{ github.sha }}
