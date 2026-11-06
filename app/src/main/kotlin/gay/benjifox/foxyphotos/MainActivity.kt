@@ -318,9 +318,7 @@ private fun FoxyPhotosApp() {
     }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            if (screen == "combined" && combinedEnabled) {
-                Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }) }
-            } else if (screen == "main" && mode == "Modern") {
+            if (screen == "main" && mode == "Modern") {
                 androidx.compose.material3.TopAppBar(
                     windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                     title = {
@@ -361,7 +359,9 @@ private fun FoxyPhotosApp() {
                     IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
                 }
             }
-            if (screen == "main" && mode == "Modern") {
+            if (screen == "combined" && combinedEnabled) {
+                Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }) }
+            } else if (screen == "main" && mode == "Modern") {
                 Box(Modifier.weight(1f)) {
                     gallerySavedState.SaveableStateProvider("gallery") {
                         LocalGallery(Modifier.fillMaxSize(), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
