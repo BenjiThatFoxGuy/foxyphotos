@@ -11,6 +11,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import gay.benjifox.foxyphotos.core.media.*
@@ -27,7 +29,7 @@ internal fun FolderAlbumSettings(open: () -> Unit) {
     var enabled by remember { mutableStateOf(FolderAlbums.enabled(context)) }
     Row {
         Text("Experimental folder → Google albums", Modifier.weight(1f))
-        Switch(enabled, onCheckedChange = { enabled = it; prefs.edit().putBoolean("experimental-folder-albums", it).apply() })
+        Switch(enabled, modifier = Modifier.semantics { contentDescription = "Enable experimental folder albums" }, onCheckedChange = { enabled = it; prefs.edit().putBoolean("experimental-folder-albums", it).apply() })
     }
     Text("Off by default. Applies only to confirmed media in admitted backup batches, including existing uploads. Exact unique titles only; equal folder names stop safely. No automatic rollover.", style = MaterialTheme.typography.bodySmall)
     Text("Album creation and membership are separate from backup success. Requests are not proof of membership; uncertain writes are never automatically replayed.", style = MaterialTheme.typography.bodySmall)

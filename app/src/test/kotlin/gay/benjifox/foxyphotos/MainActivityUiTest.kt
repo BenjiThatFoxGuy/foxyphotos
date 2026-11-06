@@ -75,6 +75,23 @@ class MainActivityUiTest {
         compose.onNodeWithText("Allow photos access").assertDoesNotExist()
     }
 
+    @Test fun folderAlbumsDefaultOffDoNotAdmitBackupOrStartRemoteReadsOnToggle() {
+        val app = RuntimeEnvironment.getApplication()
+        val prefs = app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("onboarding-completed", true).commit()
+        launch()
+        assertFalse(FolderAlbums.enabled(app))
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Experimental folder → Google albums"))
+        compose.onNodeWithContentDescription("Enable experimental folder albums").performClick()
+        org.junit.Assert.assertTrue(FolderAlbums.enabled(app))
+        assertFalse(BackupRuntime.state.value.active)
+        assertNull(shadowOf(app).nextStartedService)
+        clickSettingsEntry("Browse folders and Google albums")
+        compose.onNodeWithText("Google albums have not been loaded.").assertIsDisplayed()
+        compose.onNodeWithText("Load Google albums").assertIsEnabled()
+    }
+
     @Test fun cleanupStartsOffWithIndependentEmptyWhitelistAndCannotRun() {
         val app = RuntimeEnvironment.getApplication()
         val backup = app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
