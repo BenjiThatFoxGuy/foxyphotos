@@ -46,6 +46,12 @@ suspend fun <Item, Hash> runBackup(
     var counts = BackupCounts()
     fun emit(step: DiagnosticStep) = diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, step,
         count = counts.uploaded + counts.alreadyPresent, failed = counts.failed, uncertain = counts.uncertain))
+    suspend fun notifyConfirmed(item: Item, hashed: Hash) {
+        // Optional organization must never turn a confirmed upload into a failed upload.
+        try { if (!shouldPause()) onConfirmed(item, hashed) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Separate album status belongs to the adapter. */ }
+    }
     var hashedOnce = false
     var admittedOnce = false
     emit(DiagnosticStep.PLAN)
@@ -57,7 +63,7 @@ suspend fun <Item, Hash> runBackup(
             val hashed = hash(item)
             if (isCommitted(hashed)) {
                 counts = counts.copy(alreadyPresent = counts.alreadyPresent + 1)
-                if (!shouldPause()) onConfirmed(item, hashed)
+                notifyConfirmed(item, hashed)
             } else {
                 // Hashing can outlast a network transition or a temporary exception.
                 if (shouldPause()) return BackupRunResult(counts, paused = true)
@@ -68,7 +74,7 @@ suspend fun <Item, Hash> runBackup(
                         recordCommitted(hashed, result.mediaKey)
                         counts = if (result.alreadyPresent) counts.copy(alreadyPresent = counts.alreadyPresent + 1)
                         else counts.copy(uploaded = counts.uploaded + 1)
-                        if (!shouldPause()) onConfirmed(item, hashed)
+                        notifyConfirmed(item, hashed)
                     }
                     BackupItemOutcome.Deferred -> { emit(DiagnosticStep.CONDITION_WAIT); return BackupRunResult(counts, paused = true, waiting = true) }
                     BackupItemOutcome.Uncertain -> counts = counts.copy(uncertain = counts.uncertain + 1)
