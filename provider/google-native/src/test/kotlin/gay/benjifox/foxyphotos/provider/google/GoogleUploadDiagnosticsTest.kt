@@ -81,6 +81,27 @@ class GoogleUploadDiagnosticsTest {
         }
     }
 
+    @Test fun `manual copy single attempt never retries lost bytes or commit`() = runBlocking {
+        for (failCommit in listOf(false, true)) {
+            var attempts = 0
+            val http = OkHttpClient.Builder().retryOnConnectionFailure(false).addInterceptor { chain ->
+                val request = chain.request()
+                if ((!failCommit && request.method == "PUT") ||
+                    (failCommit && request.url.encodedPath.endsWith("16538846908252377752"))) {
+                    attempts++
+                    throw java.io.IOException("Lost response")
+                }
+                val body = if (request.method == "PUT") byteArrayOf(8, 1, 18, 1, 99) else byteArrayOf()
+                Response.Builder().request(request).protocol(Protocol.HTTP_1_1).message("ok").code(200)
+                    .header("X-GUploader-UploadID", "fixture").body(body.toResponseBody()).build()
+            }.build()
+            val client = GoogleNativeUploadClient(UploadDiagnosticSink {}, http, { "fixture" },
+                { fail("No retry delay allowed") }, singleAttempt = true)
+            try { client.upload(request()); fail("Must stay uncertain") } catch (_: GoogleUploadUncertainException) { }
+            assertEquals(1, attempts)
+        }
+    }
+
     private fun request() = GoogleUploadRequest(GoogleCredential("private@example.com", "private-id", emptyList()),
         "/DCIM/private.jpg", 42, 0, ByteArray(20) { 123 }, { ByteArrayInputStream(byteArrayOf(1)) }, UploadFileType.JPEG)
 

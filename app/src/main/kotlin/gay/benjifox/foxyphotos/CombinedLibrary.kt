@@ -59,7 +59,7 @@ internal class GooglePreviewSession(val provider: ReadOnlyLibrary) {
 }
 
 @Composable
-private fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, large: Boolean = false, source: String = "Google") {
+internal fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, large: Boolean = false, source: String = "Google") {
     var attempt by remember(item.id) { mutableIntStateOf(0) }
     var loading by remember(item.id, large, attempt) { mutableStateOf(true) }
     val bitmap by produceState<Bitmap?>(null, item.id, large, attempt) {

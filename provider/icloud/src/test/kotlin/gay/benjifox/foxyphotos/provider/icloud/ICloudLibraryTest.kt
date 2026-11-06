@@ -23,7 +23,7 @@ class ICloudLibraryTest {
     """.trimIndent()
     private fun session() = ICloudSessionImport.parse(config, "photos")
     private fun reply(json: String, cookies: List<String> = emptyList()) = ICloudReply(json.encodeToByteArray(), cookies)
-    private val validation = """{"dsInfo":{"hsaVersion":2},"hsaChallengeRequired":false,"webservices":{"ckdatabasews":{"status":"active","url":"https://p01-ckdatabasews.icloud.com"}}}"""
+    private val validation = """{"dsInfo":{"hsaVersion":2,"dsid":"fixture-account"},"hsaChallengeRequired":false,"webservices":{"ckdatabasews":{"status":"active","url":"https://p01-ckdatabasews.icloud.com"}}}"""
     private val zones = """{"zones":[{"zoneID":{"zoneName":"PrimarySync"}},{"zoneID":{"zoneName":"SharedSync-fixture"}}]}"""
 
     @Test fun `explicit section keeps compatible fields and never exposes secrets`() {
@@ -75,7 +75,7 @@ class ICloudLibraryTest {
                     if (page++ == 0) {
                         assertEquals(0,offset)
                         reply("""{"records":[
-                          {"recordType":"CPLMaster","recordName":"master","fields":{"resJPEGThumbRes":{"value":{"downloadURL":"https://cvws.icloud-content.com/preview"}},"resOriginalRes":{"value":{"downloadURL":"https://cvws.icloud-content.com/original"}}}},
+                          {"recordType":"CPLMaster","recordName":"master","fields":{"filenameEnc":{"value":"b3JpZ2luYWwuanBn"},"resJPEGThumbRes":{"value":{"downloadURL":"https://cvws.icloud-content.com/preview"}},"resOriginalRes":{"value":{"size":13,"downloadURL":"https://cvws.icloud-content.com/original"}}}},
                           {"recordType":"CPLAsset","recordName":"asset1","fields":{"assetDate":{"value":123},"masterRef":{"value":{"recordName":"master"}}}},
                           {"recordType":"CPLAsset","recordName":"asset2","fields":{"assetDate":{"value":456},"masterRef":{"value":{"recordName":"master"}}}}
                         ]}""")
@@ -90,12 +90,29 @@ class ICloudLibraryTest {
         assertNotEquals(first.items[0].id,first.items[1].id)
         assertEquals("2",first.nextCursor)
         assertEquals(456L,first.items[1].timestampMillis)
+        val metadata = client.originalInfo(first.items[1].id)
+        assertEquals("original.jpg", metadata.name)
+        assertEquals(13L, metadata.sizeBytes)
+        assertEquals(456L, metadata.timestampMillis)
+        assertFalse(metadata.video)
         assertTrue(calls.first().endsWith("/validate"))
         assertEquals("first=rotated;second=two==;",persisted!!.cookies())
         assertEquals("fixture-image",client.preview(first.items.first().id).decodeToString())
         assertEquals("fixture-image",client.read(first.items.first().id,1024).decodeToString())
         assertNull(client.page(first.nextCursor).nextCursor)
         assertEquals(1,calls.count { it.endsWith("/validate") })
+    }
+    @Test fun `validated account scope ignores cookie rotation and rejects missing identity`() = runBlocking {
+        suspend fun identity(validationBody: String, cookies: String = "rotated=value;"): String {
+            val client = ICloudLibraryClient(session().replacingCookies(cookies), ICloudWire { _,_,_,_ -> reply(validationBody) }) {}
+            return client.accountScope()
+        }
+        val first = identity(validation)
+        assertEquals(64, first.length)
+        assertEquals(first, identity(validation, "other=cookie;"))
+        assertNotEquals(first, identity(validation.replace("fixture-account", "second-account")))
+        try { identity(validation.replace(",\"dsid\":\"fixture-account\"", "")); fail("Missing identity accepted") }
+        catch (_: ICloudProtocolException) { }
     }
     @Test fun `expired sessions latch while network failures remain retryable`() = runBlocking {
         var calls = 0

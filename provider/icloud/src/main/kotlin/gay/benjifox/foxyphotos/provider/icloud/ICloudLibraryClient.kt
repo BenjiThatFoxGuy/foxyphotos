@@ -66,6 +66,10 @@ internal class AppleWire : ICloudWire {
     }
 }
 
+class ICloudOriginalInfo(val name: String, val sizeBytes: Long?, val video: Boolean, val timestampMillis: Long) {
+    override fun toString() = "ICloudOriginalInfo(redacted)"
+}
+
 /** Manual-session-only Photos client. No password sign-in, challenge submission or cloud writes. */
 class ICloudLibraryClient internal constructor(
     private var session: ICloudSession,
@@ -76,6 +80,8 @@ class ICloudLibraryClient internal constructor(
     private val lock = Mutex()
     private var endpoint: String? = null
     private var expired = false
+    private var account: String? = null
+    private val originalInfo = linkedMapOf<String, ICloudOriginalInfo>()
     private val albumsById = linkedMapOf<String, Pair<String, String?>>()
     private val resources = linkedMapOf<String, Resources>()
     private val masters = linkedMapOf<String, JSONObject>()
@@ -96,8 +102,18 @@ class ICloudLibraryClient internal constructor(
         if (service.optString("status") != "active") throw ICloudProtocolException()
         val url = service.getString("url").toHttpUrl()
         requireApple(url, media = false)
+        account = (info.optJSONObject("dsInfo")?.opt("dsid") as? String)?.takeIf { it.isNotBlank() && it.length <= 128 }
         endpoint = url.toString().trimEnd('/') + "/database/1/com.apple.photos.cloud/production/private"
     }
+
+    /** Stable validated account scope; never derives identity from mutable cookies or album names. */
+    @JvmSynthetic suspend fun accountScope(): String = lock.withLock {
+        validateLocked()
+        val id = account ?: throw ICloudProtocolException()
+        java.security.MessageDigest.getInstance("SHA-256").digest(id.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+    @JvmSynthetic fun originalInfo(id: String): ICloudOriginalInfo = originalInfo[id] ?: throw ICloudProtocolException()
 
     private suspend fun request(url: String, json: String): JSONObject {
         if (expired) throw ICloudReauthenticationRequired()
@@ -197,7 +213,7 @@ class ICloudLibraryClient internal constructor(
         val type = if (album == null) "CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted" else "CPLContainerRelationLiveByAssetDate"
         val body = zoneBody(zone, type).put("resultsLimit", 200)
         body.getJSONObject("query").put("filterBy", filters)
-        body.put("desiredKeys", JSONArray(listOf("masterRef", "assetDate", "resJPEGThumbRes", "resJPEGMedRes", "resJPEGLargeRes", "resJPEGFullRes", "resOriginalRes", "resVidFullRes")))
+        body.put("desiredKeys", JSONArray(listOf("masterRef", "assetDate", "resJPEGThumbRes", "resJPEGMedRes", "resJPEGLargeRes", "resJPEGFullRes", "resOriginalRes", "resVidFullRes", "filenameEnc")))
         val response = query(body)
         pageCalls++
         val rows = response.getJSONArray("records")
@@ -214,6 +230,14 @@ class ICloudLibraryClient internal constructor(
             val master = masters[token(zone,masterId)] ?: throw ICloudProtocolException()
             fun resource(key: String): String? = ((value(asset,key) ?: value(master,key)) as? JSONObject)?.optString("downloadURL")?.takeIf { it.isNotEmpty() }
             val key = token(zone,asset.getString("recordName"))
+            val original = (value(asset,"resOriginalRes") ?: value(master,"resOriginalRes") ?:
+                value(asset,"resVidFullRes") ?: value(master,"resVidFullRes")) as? JSONObject
+            val name = (value(master,"filenameEnc") as? String)?.let {
+                try { String(Base64.getDecoder().decode(it), Charsets.UTF_8) } catch (_: IllegalArgumentException) { null }
+            }?.takeIf { it.isNotBlank() && it.length <= 1024 && it.none { c -> c == '/' || c == '\\' || c == '\u0000' } }
+            if (name != null) originalInfo[key] = ICloudOriginalInfo(name,
+                original?.optLong("size", -1)?.takeIf { it > 0 }, value(master,"resVidFullRes") != null,
+                (value(asset,"assetDate") as? Number)?.toLong() ?: 0L)
             resources[key] = Resources(resource("resJPEGThumbRes") ?: resource("resJPEGMedRes"),
                 resource("resJPEGLargeRes") ?: resource("resJPEGFullRes") ?: resource("resJPEGMedRes"), resource("resOriginalRes") ?: resource("resVidFullRes"))
             LibraryItem(key, (value(asset,"assetDate") as? Number)?.toLong() ?: 0L, value(master,"resVidFullRes") != null)

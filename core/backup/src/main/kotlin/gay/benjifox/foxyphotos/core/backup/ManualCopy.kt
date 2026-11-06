@@ -69,6 +69,7 @@ suspend fun runManualCopy(
                 }
                 save(index, entry)
             }
+            currentCoroutineContext().ensureActive()
             if (paused()) return
             if (entry.phase == CopyPhase.UPLOADED) {
                 // Do not mark final before adapter returns: its own journal prevents replay on interruption.

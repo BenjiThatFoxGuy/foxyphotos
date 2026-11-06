@@ -163,6 +163,7 @@ internal fun ICloudLibraryControls(state: ICloudSourceState) {
     }
     if (pages >= 10) Text("iCloud page limit reached. Refresh or choose another album.", Modifier.padding(horizontal = 12.dp))
     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+    ManualCopyControls(client, album, state.items)
     if (showAlbums) AlertDialog(onDismissRequest = { showAlbums = false }, title = { Text("iCloud libraries / albums") },
         text = {
             LazyColumn(Modifier.heightIn(max = 400.dp)) {

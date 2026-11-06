@@ -39,12 +39,12 @@ internal class FolderAlbums(context: Context, account: String, private val clien
 
     fun attempted(folder: String, contentIdentity: String): Boolean = get(key("candidate", "$folder\u0000$contentIdentity")) != null
 
-    suspend fun associate(folder: String, knownFolders: Set<String>, mediaKey: String, contentIdentity: String = mediaKey, admitted: () -> Boolean): String = mutex.withLock {
+    suspend fun associate(folder: String, knownFolders: Set<String>, mediaKey: String, contentIdentity: String = mediaKey, requestedTitle: String = folderAlbumTitle(folder), admitted: () -> Boolean): String = mutex.withLock {
         if (!admitted()) return@withLock "Paused"
         if (operations >= 20) return@withLock "Batch album limit reached; run backup again for remaining items"
         val candidate = key("candidate", "$folder\u0000$contentIdentity")
         if (get(candidate) != null) return@withLock "Earlier album request uncertain or acknowledged; no replay"
-        val title = folderAlbumTitle(folder)
+        val title = requestedTitle
         if (title.isBlank() || title.length > 500 || folderTitleCollides(folder, knownFolders))
             return@withLock "Folder title collision or unsupported title; no album write"
         val claim = key("title", title)

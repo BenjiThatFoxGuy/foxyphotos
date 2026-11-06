@@ -47,6 +47,8 @@ class GoogleLibraryClient(
 
     private suspend fun albumWrite(endpoint: String, bytes: ByteArray): ByteArray = fetch(
         authenticated("https://photosdata-pa.googleapis.com/6439526531001121323/$endpoint")
+            .header("X-Goog-Ext-173412678-Bin", "CgcIAhClARgC")
+            .header("X-Goog-Ext-174067345-Bin", "CgIIAg==")
             .post(bytes.toRequestBody("application/x-protobuf".toMediaType())).build(), 1024 * 1024)
 
     override suspend fun preview(id: String, large: Boolean): ByteArray {

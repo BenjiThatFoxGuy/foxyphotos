@@ -21,9 +21,10 @@ class GoogleNativeUploadClient internal constructor(
     private val httpClient: OkHttpClient,
     private val authorization: suspend (GoogleCredential) -> String,
     private val retryDelay: suspend (Long) -> Unit,
+    private val singleAttempt: Boolean = false,
 ) {
-    constructor(diagnostics: UploadDiagnosticSink = UploadDiagnosticSink {}) : this(
-        diagnostics, OkHttpClient(), cachedAuthorization(), { delay(it) },
+    constructor(diagnostics: UploadDiagnosticSink = UploadDiagnosticSink {}, singleAttempt: Boolean = false) : this(
+        diagnostics, OkHttpClient.Builder().retryOnConnectionFailure(!singleAttempt).build(), cachedAuthorization(), { delay(it) }, singleAttempt,
     )
 
     suspend fun upload(request: GoogleUploadRequest): GoogleUploadOutcome = withContext(Dispatchers.IO) {
@@ -161,14 +162,15 @@ class GoogleNativeUploadClient internal constructor(
 
     private suspend fun <T> retrySideEffectingRequest(trace: UploadDiagnosticTrace, stage: UploadStage, block: suspend (Int) -> T): T {
         var lastFailure: Throwable? = null
-        repeat(MAX_SIDE_EFFECTING_ATTEMPTS) { attempt ->
+        val maxAttempts = if (singleAttempt) 1 else MAX_SIDE_EFFECTING_ATTEMPTS
+        repeat(maxAttempts) { attempt ->
             try {
                 return trace.step(stage, attempt + 1) { block(attempt + 1) }
             } catch (failure: GoogleHttpException) {
-                if (!failure.retryable || attempt == MAX_SIDE_EFFECTING_ATTEMPTS - 1) throw failure
+                if (!failure.retryable || attempt == maxAttempts - 1) throw failure
                 lastFailure = failure
             } catch (failure: IOException) {
-                if (attempt == MAX_SIDE_EFFECTING_ATTEMPTS - 1) {
+                if (attempt == maxAttempts - 1) {
                     throw GoogleUploadUncertainException("Connection ended during a Google upload request.", failure)
                 }
                 lastFailure = failure
