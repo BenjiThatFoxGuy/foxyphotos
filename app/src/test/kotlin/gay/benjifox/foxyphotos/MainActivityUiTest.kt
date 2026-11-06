@@ -6,6 +6,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnySibling
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -71,6 +74,28 @@ class MainActivityUiTest {
         compose.onNodeWithText("Backup folders").assertIsDisplayed()
         compose.onNodeWithText("Clear selection").assertIsDisplayed()
         compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+    }
+
+    @Test fun combinedLibraryRequiresOptInAndShowsMissingAuthWithoutRemoteRows() {
+        val app = RuntimeEnvironment.getApplication()
+        val prefs = app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("onboarding-completed", true).commit()
+        launch()
+        compose.onNodeWithText("Combined").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Experimental local + Google library"))
+        compose.onNodeWithText("Open combined library").assertDoesNotExist()
+        compose.onNode(isToggleable() and hasAnySibling(hasText("Experimental local + Google library"))).performClick()
+        org.junit.Assert.assertTrue(prefs.getBoolean("experimental-google-library", false))
+        clickSettingsEntry("Open combined library")
+        compose.onNodeWithText("Experimental · Local + Google Photos").assertIsDisplayed()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("Google access unavailable. Connect or reconnect Google Photos in Settings, then retry.").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Retry Google page").assertIsDisplayed()
+        compose.onNodeWithText("Google listing ended for this session.").assertDoesNotExist()
+        assertFalse(BackupRuntime.state.value.active)
+        assertNull(shadowOf(app).nextStartedService)
     }
 
     @Test @Config(sdk = [35]) fun selectedOnlyAccessSurvivesResumeAndRecreation() {

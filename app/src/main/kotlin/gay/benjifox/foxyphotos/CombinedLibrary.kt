@@ -130,6 +130,14 @@ internal fun CombinedLibrary(onPermission: () -> Unit) {
         }
     }
     var localGeneration by remember { mutableIntStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) localGeneration++
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(localGeneration) {
         try {
             locals = queryLocalGallery(context.contentResolver)
