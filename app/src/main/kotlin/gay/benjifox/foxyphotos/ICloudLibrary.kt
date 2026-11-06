@@ -143,7 +143,7 @@ internal fun ICloudLibraryControls(state: ICloudSourceState) {
     LaunchedEffect(Unit) {
         try {
             val stored = withContext(Dispatchers.IO) { repository.load() }
-            if (stored == null) status = "iCloud not configured. Import a session file in Settings. Local and Google remain available."
+            if (stored == null) status = "iCloud not configured. Import a session file in Settings. Local only mode is active."
             else {
                 client = ICloudLibraryClient(stored) { updated -> withContext(Dispatchers.IO) { repository.save(updated) } }
                 state.preview = GooglePreviewSession(client!!)
