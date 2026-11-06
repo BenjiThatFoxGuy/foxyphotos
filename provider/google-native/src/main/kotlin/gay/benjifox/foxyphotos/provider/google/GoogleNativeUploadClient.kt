@@ -124,7 +124,16 @@ class GoogleNativeUploadClient internal constructor(
             trace = trace,
             stage = UploadStage.COMMIT,
             attempt = attempt,
-        ).let(GoogleNativeProtocol::decodeCommittedMediaKey)
+        ).let { response ->
+            // Accepted commit bytes without a usable receipt do not prove that nothing was saved.
+            try {
+                GoogleNativeProtocol.decodeCommittedMediaKey(response)
+            } catch (failure: GoogleProtocolException) {
+                throw GoogleUploadUncertainException("Google commit outcome is unconfirmed.", failure)
+            } catch (failure: IllegalArgumentException) {
+                throw GoogleUploadUncertainException("Google commit outcome is unconfirmed.", failure)
+            }
+        }
     }
 
     private suspend fun postProtobuf(
