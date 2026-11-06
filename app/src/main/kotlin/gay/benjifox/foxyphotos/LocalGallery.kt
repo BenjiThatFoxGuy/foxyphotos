@@ -107,7 +107,7 @@ internal suspend fun queryLocalGallery(resolver: ContentResolver, images: Boolea
 private val decodeSlots = Semaphore(3)
 
 @Composable
-private fun MediaImage(media: GalleryMedia, large: Boolean = false, modifier: Modifier = Modifier) {
+internal fun MediaImage(media: GalleryMedia, large: Boolean = false, modifier: Modifier = Modifier) {
     val resolver = LocalContext.current.contentResolver
     var loading by remember(media.uri, large) { mutableStateOf(true) }
     val bitmap by produceState<Bitmap?>(null, media.uri, large) {

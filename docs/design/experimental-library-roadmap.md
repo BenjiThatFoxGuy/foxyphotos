@@ -17,6 +17,7 @@ Deliver each usable green slice rather than waiting for this entire roadmap. Do 
 ## Product milestones (ordered)
 
 - [ ] 0. Finish current gallery refresh and deliver its verified signed nightly.
+  - Implementation: `8ceee63c913897643ecb0abaae22ed2e33437091`; CI #74, run [42229714948](https://github.com/BenjiThatFoxGuy/foxyphotos/actions/runs/42229714948) green. Parent verified the exact signed APK. Delivery remains parent-owned and pending confirmation here.
 - [ ] 1. Experimental combined local + Google Photos library, explicitly enabled in Settings and off by default.
 - [ ] 2. After milestone 1 is implemented and builds green, add a separate opt-in experimental local + Google Photos + iCloud library view, off by default.
 - [ ] 3. Prioritize experimental verified local cleanup, off by default, with its own device-local folder whitelist and later-run remote content verification. This is the highest-priority functional convenience after the required provider groundwork.
@@ -26,6 +27,12 @@ Deliver each usable green slice rather than waiting for this entire roadmap. Do 
 Record concrete implementation, CI evidence, delivery and remaining provider limitations below each milestone as work progresses. Research may show prerequisites that require reordering supporting implementation, but do not silently substitute fake provider data for a working milestone.
 
 ## 1. Combined local + Google library
+
+Implementation in progress: separate native opt-in grid, real native protocol paging,
+local/Google badges, bounded lazy previews and safe encrypted credential access.
+See [pinned protocol, capacity research and limits](../research/google-combined-library.md).
+CI/artifact evidence pending. No live account verification or delivery claim.
+Milestone remains unchecked until acceptance evidence is complete.
 
 Research actual existing bclone Google Photos read/list/download capability before designing adapters; pin reference revisions and trace real request and response handling. Do not assume the upload adapter already supports a remote library. Use existing credentials only through authorized private storage. No bulk live account crawling without bounded operation limits. Ordinary read-only listing needed for an explicitly enabled feature is in scope; do not run destructive account operations during development.
 
@@ -73,7 +80,7 @@ Quality of life is the product priority: a lean native client that can map phone
 
 ### Sticky research requirement: Google Photos album capacity
 
-**UNVERIFIED user-reported claim: Google Photos may limit an individual album to 20,000 photos.** This is an album limit claim, not an account/storage quota claim. Do not present it as confirmed until researched. Fact-check current authoritative Google documentation, investigate whether photo/video/shared-album rules differ, and trace bclone/gotohp behavior and error responses at pinned revisions. Record sources, retrieval dates, certainty and any gaps. Do not create/fill a huge live album just to test a boundary. Use fixture-based boundary/error tests where possible.
+**Confirmed documentation: Google Photos albums allow up to 20,000 photos or videos (mixed media items).** See [research and native-protocol gaps](../research/google-combined-library.md), retrieved 2026-11-06. The original user-reported claim was unverified before this research. This is an album limit claim, not an account/storage quota claim. Do not present it as confirmed until researched. Fact-check current authoritative Google documentation, investigate whether photo/video/shared-album rules differ, and trace bclone/gotohp behavior and error responses at pinned revisions. Record sources, retrieval dates, certainty and any gaps. Do not create/fill a huge live album just to test a boundary. Use fixture-based boundary/error tests where possible.
 
 Track capacity handling for BOTH FoxyPhotos and bclone. Record the bclone follow-up in its own durable project documentation/tracker if cross-repo implementation is not part of the current goal; do not silently modify that repository under this app goal. Album-capacity exhaustion must not produce infinite retries, bogus duplicate albums, false membership success or data loss. Do not choose an automatic rollover/naming policy without a documented decision; surface a clear safe capacity result if necessary. Account storage entitlement does not remove a per-album bound.
 

@@ -61,7 +61,7 @@ internal object GoogleNativeProtocol {
         ProtoFields(response).message(1)?.message(3)?.string(1)?.takeIf(String::isNotBlank)
             ?: throw GoogleProtocolException("Google commit response is missing a media key.")
 
-    private class ProtoFields(data: ByteArray) {
+    internal class ProtoFields(data: ByteArray) {
         private val fields = mutableMapOf<Int, MutableList<Any>>()
 
         init {
@@ -78,6 +78,7 @@ internal object GoogleNativeProtocol {
                     }
                     2 -> {
                         val (length, afterLength) = readVarint(data, offset)
+                        require(length >= 0 && length <= (data.size - afterLength).toLong()) { "Malformed Google protobuf response." }
                         val end = afterLength + length.toInt()
                         require(end <= data.size) { "Malformed Google protobuf response." }
                         fields.getOrPut(field, ::mutableListOf).add(data.copyOfRange(afterLength, end))
@@ -88,6 +89,7 @@ internal object GoogleNativeProtocol {
             }
         }
 
+        fun messages(field: Int): List<ProtoFields> = fields[field].orEmpty().mapNotNull { (it as? ByteArray)?.let(::ProtoFields) }
         fun varint(field: Int): Long? = fields[field]?.lastOrNull() as? Long
         fun bytes(field: Int): ByteArray? = fields[field]?.lastOrNull() as? ByteArray
         fun message(field: Int): ProtoFields? = bytes(field)?.let(::ProtoFields)
@@ -110,7 +112,7 @@ internal object GoogleNativeProtocol {
     private fun varintField(field: Int, value: Long): ByteArray =
         encodeVarint((field shl 3).toLong()) + encodeVarint(value)
 
-    private fun bytesField(field: Int, value: ByteArray): ByteArray =
+    internal fun bytesField(field: Int, value: ByteArray): ByteArray =
         encodeVarint(((field shl 3) or 2).toLong()) + encodeVarint(value.size.toLong()) + value
 
     private fun encodeVarint(value: Long): ByteArray {

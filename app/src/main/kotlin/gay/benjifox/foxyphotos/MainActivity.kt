@@ -85,6 +85,7 @@ private fun FoxyPhotosApp() {
     val credentialStore = remember { AndroidKeystoreCredentialStore(context.applicationContext) }
     val googleAuthClient = remember { GoogleAuthClient() }
     val diagnostics = remember { AppDiagnostics.get(context) }
+    var combinedEnabled by remember { mutableStateOf(preferences.getBoolean("experimental-google-library", false)) }
     var showLogs by remember { mutableStateOf(false) }
     var screen by rememberSaveable { mutableStateOf("main") }
     val gallerySavedState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
@@ -316,7 +317,9 @@ private fun FoxyPhotosApp() {
     }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            if (screen == "main" && mode == "Modern") {
+            if (screen == "combined" && combinedEnabled) {
+                Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }) }
+            } else if (screen == "main" && mode == "Modern") {
                 androidx.compose.material3.TopAppBar(
                     windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                     title = {
@@ -332,6 +335,7 @@ private fun FoxyPhotosApp() {
                         }
                     },
                     actions = {
+                        if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Combined") }
                         ProfileControl(configuredAccount, onSettings = { screen = "settings" }, backupControls = {
                             if (updateState.release != null) TextButton(onClick = { screen = "settings" }) { Text("Update available") }
                             if (backupState.total > 0) {
@@ -348,9 +352,10 @@ private fun FoxyPhotosApp() {
                 )
             } else Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (screen != "main") TextButton(onClick = { screen = if (screen == "folders" || screen == "connect") "settings" else "main" }) { Text("Back") }
-                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; else -> "FoxyPhotos" },
+                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; "combined" -> "Combined library"; else -> "FoxyPhotos" },
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 if (screen == "main") {
+                    if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Combined") }
                     ProfileControl(configuredAccount)
                     IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
                 }
@@ -366,6 +371,17 @@ private fun FoxyPhotosApp() {
                     "settings" -> {
                         item { UpdateControls(updater) }
                         item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
+                        item {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Experimental local + Google library", Modifier.weight(1f))
+                                Switch(combinedEnabled, onCheckedChange = {
+                                    combinedEnabled = it
+                                    preferences.edit().putBoolean("experimental-google-library", it).apply()
+                                })
+                            }
+                            Text("Read-only Google pages and previews. Off by default; uses your saved Google connection.", style = MaterialTheme.typography.bodySmall)
+                            if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Open combined library") }
+                        }
                         item { BackupConditionSettings() }
                         item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }
                         item { TextButton(onClick = { showLogs = true }) { Text("View logs...") } }

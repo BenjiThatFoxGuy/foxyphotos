@@ -1,0 +1,64 @@
+package gay.benjifox.foxyphotos.provider.google
+
+import gay.benjifox.foxyphotos.core.model.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+
+/** Read-only, single-page native protocol adapter. Never logs request/response material. */
+class GoogleLibraryClient(
+    private val credential: suspend () -> GoogleCredential,
+    private val auth: GoogleAuthClient = GoogleAuthClient(),
+) : ReadOnlyLibrary {
+    private val http = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+        .callTimeout(30, TimeUnit.SECONDS).build()
+
+    override suspend fun page(cursor: String?): LibraryPage {
+        val request = authenticated("https://photosdata-pa.googleapis.com/6439526531001121323/18047484249733410717")
+            .header("X-Goog-Ext-173412678-Bin", "CgcIAhClARgC")
+            .header("X-Goog-Ext-174067345-Bin", "CgIIAg==")
+            .post(GoogleLibraryProtocol.request(cursor).toRequestBody("application/x-protobuf".toMediaType())).build()
+        return GoogleLibraryProtocol.decode(fetch(request, 8 * 1024 * 1024))
+    }
+
+    override suspend fun preview(id: String, large: Boolean): ByteArray {
+        require(id.isNotBlank() && id.length <= 4096)
+        // Same authenticated media route as bclone DownloadMedia, with a bounded display rendition.
+        // These are previews, never evidence of original-byte equality for cleanup.
+        val suffix = if (large) "=w1600-h1600" else "=w320-h320"
+        val url = "https://lh3.googleusercontent.com/".toHttpUrl().newBuilder()
+            .addPathSegment("p").addPathSegment(id + suffix).build()
+        return fetch(authenticated(url.toString()).get().build(), if (large) 8 * 1024 * 1024 else 2 * 1024 * 1024)
+    }
+
+    private suspend fun authenticated(url: String): Request.Builder = Request.Builder().url(url)
+        .header("Authorization", auth.exchange(credential()).authorizationHeader())
+        .header("User-Agent", "Google Photos/49029607 (Pixel XL; Android 9)")
+        .header("Accept-Language", "en-US")
+
+    private suspend fun fetch(request: Request, limit: Int): ByteArray = http.newCall(request).consumeCancellable { response ->
+        if (response.code == 401 || response.code == 403) {
+            auth.clearCachedSession()
+            throw GoogleAuthenticationException("Google library access denied. Reconnect Google Photos in Settings.")
+        }
+        if (!response.isSuccessful) throw IOException("Google library request failed (HTTP ${response.code}).")
+        val body = response.body ?: throw IOException("Google library response is empty.")
+        if (body.contentLength() > limit) throw IOException("Google response exceeds the preview/page safety limit.")
+        body.byteStream().use { input ->
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (output.size() <= limit) {
+                val count = input.read(buffer, 0, minOf(buffer.size, limit + 1 - output.size()))
+                if (count < 0) break
+                output.write(buffer, 0, count)
+            }
+            val bytes = output.toByteArray()
+            if (bytes.size > limit) throw IOException("Google response exceeds the preview/page safety limit.")
+            bytes
+        }
+    }
+}
