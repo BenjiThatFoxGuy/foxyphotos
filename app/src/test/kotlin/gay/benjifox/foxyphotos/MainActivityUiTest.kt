@@ -88,9 +88,12 @@ class MainActivityUiTest {
         org.junit.Assert.assertTrue(FolderAlbums.enabled(app))
         assertFalse(BackupRuntime.state.value.active)
         assertNull(shadowOf(app).nextStartedService)
-        clickSettingsEntry("Browse folders and Google albums")
-        compose.onNodeWithText("Google albums have not been loaded.").assertIsDisplayed()
-        compose.onNodeWithText("Load Google albums").assertIsEnabled()
+        clickSettingsEntry("Folder album destinations")
+        compose.onNodeWithText("Folder album destinations").assertIsDisplayed()
+        compose.onNodeWithText("Saving a destination does not select a backup folder or start backup. Manage inclusion in Backup folders.").assertIsDisplayed()
+        assertFalse(BackupRuntime.state.value.active)
+        assertNull(shadowOf(app).nextStartedService)
+        org.junit.Assert.assertTrue(prefs.getStringSet("enabled-folders", emptySet())!!.isEmpty())
     }
 
     @Test fun cleanupStartsOffWithIndependentEmptyWhitelistAndCannotRun() {
@@ -327,7 +330,19 @@ class MainActivityUiTest {
         org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("media", object : android.content.ContentProvider() {
             override fun onCreate() = true
             override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?) =
-                android.database.MatrixCursor(projection!!).apply { queryCount.incrementAndGet(); addRow(arrayOf("DCIM/Test/")) }
+                android.database.MatrixCursor(projection!!).apply {
+                    queryCount.incrementAndGet()
+                    addRow(projection.map { column ->
+                        when (column) {
+                            android.provider.MediaStore.MediaColumns.RELATIVE_PATH -> "DCIM/Test/"
+                            android.provider.MediaStore.MediaColumns.VOLUME_NAME -> "external_primary"
+                            android.provider.MediaStore.MediaColumns._ID -> 1L
+                            android.provider.MediaStore.MediaColumns.DATE_TAKEN,
+                            android.provider.MediaStore.MediaColumns.DATE_ADDED -> 0L
+                            else -> null
+                        }
+                    }.toTypedArray())
+                }
             override fun getType(uri: android.net.Uri) = null
             override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
             override fun delete(uri: android.net.Uri, selection: String?, args: Array<out String>?) = 0
