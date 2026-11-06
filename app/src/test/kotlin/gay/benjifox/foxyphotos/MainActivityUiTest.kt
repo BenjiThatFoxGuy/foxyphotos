@@ -184,6 +184,33 @@ class MainActivityUiTest {
         assertNull(shadowOf(app).nextStartedService)
     }
 
+    @Test fun persistedIcloudOnlyNeverQueriesGrantedDeviceMedia() {
+        val app = RuntimeEnvironment.getApplication()
+        val queries = java.util.concurrent.atomic.AtomicInteger()
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("media", object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?): android.database.Cursor {
+                queries.incrementAndGet()
+                return android.database.MatrixCursor(projection ?: emptyArray())
+            }
+            override fun getType(uri: android.net.Uri) = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
+            override fun delete(uri: android.net.Uri, selection: String?, args: Array<out String>?) = 0
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = 0
+        })
+        app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE).edit()
+            .putBoolean("onboarding-completed", true).putString("main-library-mode", "icloud").commit()
+        val activity = launch()
+        compose.onNodeWithText("Refresh iCloud").assertIsDisplayed()
+        controller!!.pause().stop().start().resume()
+        compose.waitForIdle()
+        org.junit.Assert.assertEquals(0, queries.get())
+        assertNull(shadowOf(activity).lastRequestedPermission)
+        compose.onNodeWithText("Refresh Google").assertDoesNotExist()
+        compose.onNodeWithText("Photo access").assertDoesNotExist()
+    }
+
     @Test @Config(sdk = [35]) fun selectedOnlyAccessSurvivesResumeAndRecreation() {
         val app = RuntimeEnvironment.getApplication()
         shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
