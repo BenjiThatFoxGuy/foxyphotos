@@ -45,11 +45,14 @@ Confirmed by authoritative sources retrieved 2026-11-06:
 
 This is one mixed photo/video item count, not storage entitlement. Neither source
 establishes a separate shared-album allowance; do not assume sharing increases it.
+The sharing help page https://support.google.com/photos/answer/6131416?hl=en
+also documents a 20,000-photo *conversation* limit; conversations must not be
+confused with shared albums. No distinct shared-album maximum was found.
 Public API failure semantics do not establish native protobuf error envelopes.
 No boundary was tested against a live account.
 
 bclone `gotohp.go` addToAlbum refreshes the library cache before resolving titles,
-then creates only if missing; its title-to-key map cannot represent ambiguous equal
+then creates if its cache has no match (refresh errors are discarded); its title-to-key map cannot represent ambiguous equal
 titles. Creation is outside a single atomic resolve/create critical section.
 `api/client.go` AddMediaToAlbum ignores successful response bytes and has no capacity
 classification; CreateAlbum only decodes the returned key. No native capacity

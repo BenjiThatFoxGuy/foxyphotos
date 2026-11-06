@@ -3,6 +3,7 @@ package gay.benjifox.foxyphotos
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import androidx.compose.material3.Switch
 import android.provider.Settings
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.imePadding
