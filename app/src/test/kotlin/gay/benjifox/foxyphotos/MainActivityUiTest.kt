@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -58,6 +60,19 @@ class MainActivityUiTest {
         return controller!!.get()
     }
 
+    private fun clickSettingsEntry(label: String) {
+        // LazyColumn may not compose lower rows until scrolled (for example below App updates).
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(label))
+        compose.onNodeWithText(label).assertIsDisplayed().assertHasClickAction().performClick()
+    }
+
+    private fun assertSelectedPhotoAccess() {
+        // Prove we reached/stayed on folders before checking the absent permission action.
+        compose.onNodeWithText("Backup folders").assertIsDisplayed()
+        compose.onNodeWithText("Clear selection").assertIsDisplayed()
+        compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+    }
+
     @Test @Config(sdk = [35]) fun selectedOnlyAccessSurvivesResumeAndRecreation() {
         val app = RuntimeEnvironment.getApplication()
         shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
@@ -65,14 +80,14 @@ class MainActivityUiTest {
             .edit().putBoolean("onboarding-completed", true).commit()
         launch()
         compose.onNodeWithContentDescription("Settings").performClick()
-        compose.onNodeWithText("Backup folders").performClick()
-        compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+        clickSettingsEntry("Backup folders")
+        assertSelectedPhotoAccess()
         controller!!.pause().stop().start().resume()
         compose.waitForIdle()
-        compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+        assertSelectedPhotoAccess()
         controller!!.recreate()
         compose.waitForIdle()
-        compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+        assertSelectedPhotoAccess()
     }
 
     @Test fun notificationsAreRequestedOnlyFromTheirSetupStep() {
@@ -105,7 +120,7 @@ class MainActivityUiTest {
         org.junit.Assert.assertTrue(prefs.getBoolean("onboarding-completed", false))
         org.junit.Assert.assertEquals("Simple", prefs.getString("app-mode", null))
         compose.onNodeWithContentDescription("Settings").performClick()
-        compose.onNodeWithText("Setup").performClick()
+        clickSettingsEntry("Setup")
         compose.onNodeWithText("Welcome!").assertIsDisplayed()
         assertFalse(BackupRuntime.state.value.active)
         assertNull(shadowOf(RuntimeEnvironment.getApplication()).nextStartedService)
@@ -174,7 +189,7 @@ class MainActivityUiTest {
         })
         launch()
         compose.onNodeWithContentDescription("Settings").performClick()
-        compose.onNodeWithText("Backup folders").performClick()
+        clickSettingsEntry("Backup folders")
         compose.waitUntil(5000) {
             compose.waitForIdle()
             shadowOf(android.os.Looper.getMainLooper()).idle()
@@ -184,12 +199,14 @@ class MainActivityUiTest {
         compose.onNodeWithText("DCIM/Test/").assertIsDisplayed()
         val first = queryCount.get()
         compose.onNodeWithText("Back").performClick()
-        compose.onNodeWithText("Backup folders").performClick()
+        clickSettingsEntry("Backup folders")
         compose.waitUntil(5000) {
             compose.waitForIdle()
             shadowOf(android.os.Looper.getMainLooper()).idle()
-            queryCount.get() >= first + 2
+            queryCount.get() >= first + 2 &&
+                compose.onAllNodesWithText("DCIM/Test/").fetchSemanticsNodes().isNotEmpty()
         }
+        compose.onNodeWithText("DCIM/Test/").assertIsDisplayed()
         compose.onNodeWithText("Refresh folders").assertDoesNotExist()
         assertFalse(BackupRuntime.state.value.active)
         assertNull(shadowOf(app).nextStartedService)
