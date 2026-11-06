@@ -9,6 +9,7 @@ import kotlinx.coroutines.*
 internal object BackupExecution {
     private var owner: Any? = null
     var jobCancellation: (() -> Unit)? = null
+    var runningJobId: Int? = null
     fun cancelJob(): Boolean { val cancel = jobCancellation ?: return false; cancel(); return true }
     @Synchronized fun acquire(token: Any): Boolean {
         if (owner != null) return false
@@ -41,7 +42,9 @@ internal object BackupScheduling {
                     .setTriggerContentUpdateDelay(1000).setTriggerContentMaxDelay(5000)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).build())
             } else scheduler.cancel(CONTENT)
-        } else { scheduler.cancel(PERIODIC); scheduler.cancel(CONTENT); scheduler.cancel(8104) }
+        } else {
+            listOf(PERIODIC, CONTENT, 8104).filter { it != BackupExecution.runningJobId }.forEach { scheduler.cancel(it) }
+        }
         // Independent clocks also wake a paused user-started Simple request, never a fresh run.
         val now = System.currentTimeMillis()
         val deadlines = listOf("pause", "override", "immediate").filter { p.timerActive(it) }.map {
@@ -58,7 +61,11 @@ internal class BackupJobService : JobService() {
     private var scope: CoroutineScope? = null
     override fun onStartJob(params: JobParameters): Boolean {
         val policy = AndroidBackupPolicy(this)
-        if (BackupRuntime.state.value.active || !BackupExecution.acquire(this)) { jobFinished(params, false); return false }
+        if (BackupRuntime.state.value.active || !BackupExecution.acquire(this)) {
+            jobFinished(params, false)
+            if (params.jobId == BackupScheduling.CONTENT) android.os.Handler(mainLooper).post { BackupScheduling.refresh(this, true) }
+            return false
+        }
         val modern = policy.prefs.getString("app-mode", "Simple") == "Modern"
         if (((!modern || params.jobId == BackupScheduling.TIMER) && !policy.prefs.getBoolean("request-pending", false)) || policy.reasons().isNotEmpty()) {
             BackupExecution.release(this)
@@ -67,6 +74,7 @@ internal class BackupJobService : JobService() {
         }
         val host = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         scope = host
+        BackupExecution.runningJobId = params.jobId
         BackupExecution.jobCancellation = { host.cancel() }
         host.launch {
             val id = java.util.UUID.randomUUID().toString()
@@ -91,13 +99,14 @@ internal class BackupJobService : JobService() {
                 BackupExecution.release(this@BackupJobService)
                 scope = null
                 BackupExecution.jobCancellation = null
+                BackupExecution.runningJobId = null
                 jobFinished(params, false)
                 android.os.Handler(mainLooper).post { BackupScheduling.refresh(this@BackupJobService, params.jobId == BackupScheduling.CONTENT) }
             }
         }
         return true
     }
-    override fun onStopJob(params: JobParameters): Boolean { AndroidBackupPolicy(this).endOverride(); scope?.cancel(); return false }
+    override fun onStopJob(params: JobParameters): Boolean { val p = AndroidBackupPolicy(this); if (p.prefs.getBoolean("override-batch", false)) p.endOverride(); scope?.cancel(); return false }
     override fun onDestroy() { scope?.cancel(); super.onDestroy() }
 }
 class BackupBootReceiver : BroadcastReceiver() {

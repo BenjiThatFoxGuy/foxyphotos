@@ -82,7 +82,7 @@ class BackupSession(
     }
     fun cancel(runId: String, timedOut: Boolean = false) {
         if (state.value.runId != runId) return
-        if (state.value.phase == BackupPhase.PAUSED) {
+        if (state.value.phase == BackupPhase.PAUSED || state.value.phase == BackupPhase.WAITING) {
             publish(state.value.copy(phase = BackupPhase.CANCELLED))
             return
         }

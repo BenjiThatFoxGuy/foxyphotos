@@ -62,6 +62,7 @@ internal class AndroidBackupWork(private val context: Context) {
                 shouldPause = { shouldPause() || policy.reasons(currentItem).isNotEmpty() },
                 onProgress = { counts = it; report(BackupPhase.HASHING) },
             )
+            if (policy.prefs.getBoolean("override-batch", false) && (result.counts.failed > 0 || result.counts.uncertain > 0)) policy.endOverride()
             if (!result.paused) policy.finish()
             return result.copy(waiting = result.paused && !policy.paused())
         } finally { secret.fill(0) }
