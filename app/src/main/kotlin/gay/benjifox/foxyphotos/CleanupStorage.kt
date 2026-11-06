@@ -56,6 +56,7 @@ internal class CleanupStorage(private val context: Context) {
             val folder = "$volume:${c.getString(2) ?: error("Folder unavailable") }"
             val canonical = uri.buildUpon().path(uri.path!!.replaceFirst("/${MediaStore.getVolumeName(uri)}/", "/$volume/")).build()
             val version = MediaStore.getVersion(context, volume)
+            check(!version.isNullOrBlank()) { "MediaStore identity unavailable" }
             CleanupLocal(canonical, "$canonical|$version|$size|${c.getLong(1)}|${c.getLong(3)}|${c.getLong(4)}|$folder", folder, size, c.getString(7), c.getLong(3))
         } ?: error("Media unavailable")
     }

@@ -18,6 +18,7 @@ internal class AndroidBackupWork(private val context: Context) {
         val cleanupRun = java.util.UUID.randomUUID().toString()
         val cleanup = CleanupStorage(context)
         var cleanupBefore: CleanupLocal? = null
+        var recordedCleanupEvidence = false
         val diagnostics = AppDiagnostics.get(context)
         diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, DiagnosticStep.SCAN))
         val policy = AndroidBackupPolicy(context)
@@ -86,6 +87,7 @@ internal class AndroidBackupWork(private val context: Context) {
                                         cleanup.record(after.uri, gay.benjifox.foxyphotos.core.backup.CleanupUploadEvidence(
                                             after.identity, after.folder, digest, after.size, outcome.mediaKey,
                                             cleanupRun, System.currentTimeMillis()))
+                                        recordedCleanupEvidence = true
                                     }
                                 }
                             } catch (cancelled: CancellationException) { throw cancelled }
@@ -111,7 +113,7 @@ internal class AndroidBackupWork(private val context: Context) {
             return result.copy(waiting = result.paused && !policy.paused())
         } finally {
             secret.fill(0)
-            try { cleanup.endRun(cleanupRun) } catch (_: Exception) { /* Incomplete run evidence stays ineligible. */ }
+            try { if (recordedCleanupEvidence) cleanup.endRun(cleanupRun) } catch (_: Exception) { /* Incomplete run evidence stays ineligible. */ }
         }
     }
 
