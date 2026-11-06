@@ -106,6 +106,11 @@ Both actions first copy: explicit source selection, bounded queue/staging, progr
 
 ## 3. Verified local cleanup
 
+Parent handoff (2026-11-06): final source `93df29157faf634bac3e91450fff3e54cd10e052`,
+CI #91 [run 42244877755](https://github.com/BenjiThatFoxGuy/foxyphotos/actions/runs/42244877755)
+green; parent reports the exact signed artifact verified and is delivering it now.
+No live/device acceptance is claimed. The prior process is complete.
+
 Implemented (2026-11-06): default-off native cleanup screen in Settings,
 independent actual-volume + folder whitelist, durable new-upload receipts and explicit later-run
 actual Google `=d` byte-stream verification. A usable per-item Android 11+ write-consent
@@ -145,14 +150,59 @@ Implement policy, durable evidence and a safe preview first. Do not execute real
 
 ## 4. Folder-derived Google albums and browsing
 
-2026-11-06 safe groundwork alongside cleanup: portable `matchFolderAlbum` resolves
-only an exact unique existing title to an opaque provider identity, preserves the
-full device-folder identity, and blocks ambiguous/incomplete enumeration. Focused
-fixtures cover duplicate titles, partial listings and distinct device folders.
-This is policy groundwork only: no new album browser, automatic creation, mapping
-setting or album writes are claimed. Native album enumeration/capacity/membership
-fixtures and usable browsing remain milestone 4 work. Google transformed downloads
-remain excluded from cleanup rather than being called verified.
+Implemented usable bounded request slice (2026-11-06), implementation through
+`58ffce6`: Settings has an independent default-off folder-derived Google album
+switch and real native Google album metadata listing, explicit paging, item counts
+when supplied, and Google Photos content links using returned web album IDs.
+Actual local folders open a native item/preview grid. Existing iCloud album/library
+reads remain available in their separate opt-in experiment. **Google album contents
+are not rendered in-app**; this is a remaining native protocol capability, not
+fixture data presented as remote membership.
+
+Admitted backup batches separately organize new confirmations and ledger-deduplicated
+content. Read-only hash lookup resolves current-account media identities without
+reuploading confirmed media or trusting the older account-unscoped upload ledger.
+Exact unique existing album lookup precedes creation; incomplete enumeration,
+duplicate titles, admitted equal-leaf folders and persisted cross-folder title
+claims stop writes. Full actual-volume/folder identity, account-scoped confirmed
+album identity, creation intent, candidate intent, membership request and capacity
+reservations persist privately with checked synchronous commits. A process mutex
+serializes local resolver/write operations. New creation includes one confirmed
+media key; response confirms the album identity, **not membership**. Lost creation
+responses never cause automatic creation retries or title-only adoption.
+
+Existing albums need known room under the authoritative 20,000 mixed-item bound,
+including conservative unresolved reservations. Full/unknown capacity stops safely;
+there is no rollover policy. Requests are bounded to twenty current-account presence
+checks / twenty album writes per admitted pass; later passes skip journaled candidates.
+HTTP membership acknowledgement is explicitly unconfirmed. Uncertain/acknowledged
+requests are never replayed automatically; no album failure changes confirmed
+backup success. Lifecycle diagnostics contain no provider/media/folder identifiers.
+
+Focused fixtures cover exact metadata/wire shapes, missing count, lost creation/add
+responses, durable non-replay, 19,999/20,000 capacity, partial listing, ambiguous and
+cross-volume folder collisions, concurrent instances, renamed mappings, default-off
+native settings and upload/dedup outcome isolation. CI evidence is recorded below
+when complete. No local Gradle/SDK/cache/emulator or live personal account mutation.
+See [pinned protocol, write safety and precise limits](../research/google-folder-albums.md).
+
+Remaining: live account/device acceptance, native Google album-content rendering,
+confirmed membership decoder/readback, and explicit uncertain-journal reconciliation.
+No client-only mutex can exclude external writers between lookup and create/add;
+there is no researched native atomic compare-and-create primitive. External races
+can yield duplicate creation or uncertain/rejected association; subsequent ambiguous
+lookup stops safely. Conservative reservation overcount can reduce usable capacity.
+This slice must not qualify destructive transfers as having preserved album membership.
+The main-library mode selector and subjective integration polish remain deferred.
+Parent owns delivery and acceptance; the milestone remains unchecked.
+
+User steps: Settings → Browse folders and Google albums → select a local folder,
+or Load Google albums and page explicitly → Open album in Google Photos for remote
+contents. For optional mapping, enable Experimental folder → Google albums, then
+start an ordinary selected-folder or selected-item backup. Return to Settings for
+its separate album status and View logs for safe lifecycle events. Review the actual
+Google album yourself: backup success and album creation are not membership proof.
+Run backup again for later bounded candidates; earlier uncertain requests stay stopped.
 
 
 Quality of life is the product priority: a lean native client that can map phone folder A to backend album A, not merely another uploader. Prototype browsing real provider albums and local folders alongside the optional mapping. Keep future iOS reuse in the core; no iOS implementation in this goal.
