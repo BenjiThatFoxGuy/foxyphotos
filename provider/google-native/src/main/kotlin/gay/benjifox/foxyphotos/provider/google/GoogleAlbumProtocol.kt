@@ -10,7 +10,7 @@ data class GoogleAlbumPage(val albums: List<GoogleAlbum>, val nextCursor: String
 
 interface GoogleAlbumAccess {
     suspend fun albumPage(cursor: String? = null): GoogleAlbumPage
-    suspend fun createAlbum(title: String): String
+    suspend fun createAlbum(title: String, initialMediaKey: String? = null): String
     suspend fun requestMembership(albumId: String, mediaKey: String)
 }
 
@@ -36,8 +36,9 @@ internal object GoogleAlbumProtocol {
     }
     private fun text(field: Int, value: String) = bytesField(field, value.toByteArray(Charsets.UTF_8))
     private fun device() = text(3, "Pixel XL") + text(4, "Google") + varintField(5, 28)
-    fun create(title: String, seconds: Long = System.currentTimeMillis() / 1000): ByteArray =
-        text(1, title) + varintField(2, seconds) + varintField(3, 1) + bytesField(6, byteArrayOf()) +
+    fun create(title: String, seconds: Long = System.currentTimeMillis() / 1000, initialMediaKey: String? = null): ByteArray =
+        text(1, title) + varintField(2, seconds) + varintField(3, 1) +
+            (initialMediaKey?.let { bytesField(4, bytesField(1, text(1, it))) } ?: byteArrayOf()) + bytesField(6, byteArrayOf()) +
             bytesField(7, varintField(1, 3)) + bytesField(8, device())
     fun add(albumId: String, key: String, seconds: Long = System.currentTimeMillis() / 1000): ByteArray {
         require(albumId.isNotBlank() && key.isNotBlank() && albumId.length <= 4096 && key.length <= 4096)

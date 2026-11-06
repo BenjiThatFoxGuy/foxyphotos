@@ -34,9 +34,9 @@ class GoogleLibraryClient(
     }
 
     /** No retry: a response loss can follow a committed remote write. */
-    override suspend fun createAlbum(title: String): String {
+    override suspend fun createAlbum(title: String, initialMediaKey: String?): String {
         require(title.isNotBlank() && title.length <= 500)
-        val bytes = albumWrite("8386163679468898444", GoogleAlbumProtocol.create(title))
+        val bytes = albumWrite("8386163679468898444", GoogleAlbumProtocol.create(title, initialMediaKey = initialMediaKey))
         return GoogleAlbumProtocol.createdId(bytes)
     }
 

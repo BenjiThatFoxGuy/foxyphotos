@@ -64,14 +64,15 @@ internal class FolderAlbums(context: Context, account: String, private val clien
                 if (!admitted()) return@withLock "Paused"
                 operations++
                 put(intent, "pending")
-                id = client.createAlbum(title)
-                put(mapping, id)
-                put(intent, "confirmed")
-                // Re-enumerate after creation: external equal-title races fail closed before association.
-                cached = albums()
-                val confirmed = matchFolderAlbum(folder, title, cached!!.map { AlbumIdentity(it.id, it.title) }, true)
-                if (confirmed !is AlbumNameMatch.Existing || confirmed.albumId != id)
-                    return@withLock "Album created; unique listing confirmation unavailable, membership not requested"
+                id = client.createAlbum(title, mediaKey)
+                // The create response confirms identity, not that the included item became a member.
+                // Persist identity and unresolved membership atomically before allowing another item.
+                check(prefs.edit().putString(mapping, id).putString(intent, "confirmed")
+                    .putString(key("member", "$id\u0000$mediaKey"), "acknowledged")
+                    .putString(key("reserved", id), "1").commit())
+                cached = null
+                return@withLock "Album creation confirmed; included media membership unconfirmed"
+
             }
             else -> return@withLock "Ambiguous album title; no album write"
         }

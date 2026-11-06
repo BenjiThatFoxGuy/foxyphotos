@@ -23,7 +23,7 @@ class FolderAlbumsTest {
         var loseAdd = false
         var partial = false
         override suspend fun albumPage(cursor: String?) = GoogleAlbumPage(entries, if (partial) "same" else null)
-        override suspend fun createAlbum(title: String): String {
+        override suspend fun createAlbum(title: String, initialMediaKey: String?): String {
             created++
             entries = listOf(GoogleAlbum("created", title, 0, null))
             if (loseCreate) error("lost")
@@ -81,7 +81,7 @@ class FolderAlbumsTest {
     @Test fun concurrentInstancesSerializeCreationAndMembership() = runBlocking {
         val fake = Fake().apply { entries = emptyList() }
         coroutineScope { (1..4).map { async { map(fake) } }.awaitAll() }
-        assertEquals(1, fake.created); assertEquals(1, fake.added)
+        assertEquals(1, fake.created); assertEquals(0, fake.added)
     }
     @Test fun renamedMappedAlbumAndAnotherFolderCannotSilentlyRemap() = runBlocking {
         val fake = Fake(); map(fake)
