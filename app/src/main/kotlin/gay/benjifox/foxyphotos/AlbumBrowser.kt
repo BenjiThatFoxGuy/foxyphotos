@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import gay.benjifox.foxyphotos.provider.google.*
+import gay.benjifox.foxyphotos.core.model.safelyRecord
 import kotlinx.coroutines.*
 
 @Composable
