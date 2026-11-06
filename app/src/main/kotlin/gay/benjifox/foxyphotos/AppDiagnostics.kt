@@ -73,8 +73,13 @@ internal class AppDiagnostics private constructor(private val context: Context) 
         // only applicationContext reaches the private constructor, never an activity.
         @SuppressLint("StaticFieldLeak")
         @Volatile private var instance: AppDiagnostics? = null
-        fun get(context: Context): AppDiagnostics = instance ?: synchronized(this) {
-            instance ?: AppDiagnostics(context.applicationContext).also { instance = it }
+        fun get(context: Context): AppDiagnostics {
+            val application = context.applicationContext
+            // Robolectric replaces the application between tests while retaining class statics.
+            return instance?.takeIf { it.context === application } ?: synchronized(this) {
+                instance?.takeIf { it.context === application }
+                    ?: AppDiagnostics(application).also { instance = it }
+            }
         }
     }
 }

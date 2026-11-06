@@ -47,6 +47,7 @@ class UpdaterDiagnosticsTest {
         exported = diagnostics.exportText()
         assertTrue(exported.contains("manifest missing"))
         assertTrue(exported.contains("reason=network"))
+        assertTrue("Diagnostics must persist successfully", diagnostics.snapshot().storageHealthy)
         assertFalse(java.io.File(context.noBackupFilesDir, "diagnostics/events-v1").readText().contains(secret))
         assertFalse(exported.contains(secret))
         assertFalse(exported.contains("https://"))
