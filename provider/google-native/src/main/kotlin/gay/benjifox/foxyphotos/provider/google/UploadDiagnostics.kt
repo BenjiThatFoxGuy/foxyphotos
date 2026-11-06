@@ -1,5 +1,6 @@
 package gay.benjifox.foxyphotos.provider.google
 
+import gay.benjifox.foxyphotos.core.model.DiagnosticEvent
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -90,7 +91,7 @@ class UploadDiagnosticLog(
     private val maxEvents: Int = 400,
     private val maxBytes: Int = 256 * 1024,
 ) : UploadDiagnosticSink {
-    private val events = ArrayDeque<UploadDiagnosticEvent>()
+    private val events = ArrayDeque<Any>()
     @Volatile var storageHealthy: Boolean = true
         private set
 
@@ -101,7 +102,7 @@ class UploadDiagnosticLog(
                 require(file.length() <= maxBytes)
                 val lines = file.readText(Charsets.UTF_8).lines()
                 require(lines.firstOrNull() == HEADER)
-                lines.drop(1).filter(String::isNotEmpty).forEach { events.addLast(UploadDiagnosticEvent.decode(it)) }
+                lines.drop(1).filter(String::isNotEmpty).forEach { events.addLast(if (it.startsWith("op|")) DiagnosticEvent.decode(it) else UploadDiagnosticEvent.decode(it)) }
                 trim()
             }
         } catch (_: Exception) {
@@ -118,14 +119,21 @@ class UploadDiagnosticLog(
         persist()
     }
 
-    @Synchronized fun snapshot(): List<UploadDiagnosticEvent> = events.toList()
+    @Synchronized fun snapshot(): List<UploadDiagnosticEvent> = events.filterIsInstance<UploadDiagnosticEvent>()
+
+    @Synchronized fun record(event: DiagnosticEvent) { events.addLast(event); trim(); persist() }
+    @Synchronized fun renderedSnapshot(): List<String> = events.map { when (it) {
+        is DiagnosticEvent -> it.render()
+        is UploadDiagnosticEvent -> it.render()
+        else -> error("Unsupported diagnostic")
+    } }
 
     @Synchronized fun clear() {
         events.clear()
         persist()
     }
 
-    private fun encoded(): String = HEADER + "\n" + events.joinToString("\n", postfix = if (events.isEmpty()) "" else "\n") { it.encode() }
+    private fun encoded(): String = HEADER + "\n" + events.joinToString("\n", postfix = if (events.isEmpty()) "" else "\n") { when (it) { is DiagnosticEvent -> it.encode(); is UploadDiagnosticEvent -> it.encode(); else -> error("Unsupported diagnostic") } }
 
     private fun trim() {
         while (events.size > maxEvents || encoded().toByteArray(Charsets.UTF_8).size > maxBytes) events.removeFirst()

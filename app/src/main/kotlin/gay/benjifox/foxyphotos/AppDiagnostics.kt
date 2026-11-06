@@ -1,5 +1,8 @@
 package gay.benjifox.foxyphotos
 
+import gay.benjifox.foxyphotos.core.model.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import android.content.Context
 import android.annotation.SuppressLint
 import android.content.pm.ApplicationInfo
@@ -12,19 +15,35 @@ import kotlinx.coroutines.withContext
 
 internal const val DIAGNOSTIC_PRIVACY_NOTICE =
     "logs stay in app-private storage until you export them. they contain timestamps, random upload ids, " +
-    "file types and sizes, stages, http status, retry attempts and numeric response structure only. " +
+    "file types and sizes, stages, http status, retry attempts, safe release versions, counts and numeric response structure only. " +
     "no filenames, paths, accounts, urls, hashes, media keys, credentials, response contents or exception text. " +
     "review before sharing. clearing logs does not delete exported files."
 
 /** shared across activity recreation; all storage access is dispatched off the main thread. */
-internal class AppDiagnostics private constructor(private val context: Context) : UploadDiagnosticSink {
+internal class AppDiagnostics private constructor(private val context: Context) : UploadDiagnosticSink, DiagnosticSink {
     private val log by lazy { UploadDiagnosticLog(File(context.noBackupFilesDir, "diagnostics/events-v1")) }
+
+    private data class Write(val event: DiagnosticEvent? = null, val done: CompletableDeferred<Unit>? = null)
+    private val queue = Channel<Write>(128)
+    private val writer = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        for (write in queue) {
+            try { write.event?.let { log.record(it) } } catch (_: Exception) { }
+            finally { write.done?.complete(Unit) }
+        }
+    }
+    override fun record(event: DiagnosticEvent) { queue.trySend(Write(event)) }
+
+    suspend fun flush() {
+        val done = CompletableDeferred<Unit>()
+        queue.send(Write(done = done))
+        done.await()
+    }
 
     // the provider invokes this sink on its io dispatcher.
     override fun record(event: UploadDiagnosticEvent) = log.record(event)
 
     suspend fun snapshot(): DiagnosticSnapshot = withContext(Dispatchers.IO) {
-        DiagnosticSnapshot(log.snapshot().map { it.render() }, log.storageHealthy)
+        DiagnosticSnapshot(log.renderedSnapshot(), log.storageHealthy)
     }
 
     suspend fun clear(): Boolean = withContext(Dispatchers.IO) {
@@ -46,7 +65,7 @@ internal class AppDiagnostics private constructor(private val context: Context) 
             appendLine("auth http status is unavailable; attempt numbers restart for each stage")
             appendLine("storage_healthy=${log.storageHealthy}")
             appendLine()
-            log.snapshot().forEach { appendLine(it.render()) }
+            log.renderedSnapshot().forEach { appendLine(it) }
         }
     }
 

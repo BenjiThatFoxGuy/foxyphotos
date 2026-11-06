@@ -161,7 +161,7 @@ internal fun DiagnosticLogViewer(diagnostics: AppDiagnostics, onClose: () -> Uni
             }
             Text("share creates a temporary cache attachment, not a saved document.", style = MaterialTheme.typography.bodySmall)
             HorizontalDivider()
-            if (snapshot.lines.isEmpty()) Text("no diagnostic events yet. run a backup, then check here.")
+            if (snapshot.lines.isEmpty()) Text("no diagnostic events yet. check for updates or run a backup, then check here.")
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(snapshot.lines) { _, line ->
                     SelectionContainer {

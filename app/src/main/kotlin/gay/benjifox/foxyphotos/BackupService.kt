@@ -47,7 +47,7 @@ internal open class BackupService : Service() {
     override fun onCreate() {
         super.onCreate()
         notifications = BackupNotifications(this)
-        session = BackupSession(serviceScope, BackupRuntime.mutableState, ::performBackup, ::publish)
+        session = BackupSession(serviceScope, BackupRuntime.mutableState, ::performBackup, ::publish, AppDiagnostics.get(this))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

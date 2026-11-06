@@ -1,5 +1,6 @@
 package gay.benjifox.foxyphotos
 
+import gay.benjifox.foxyphotos.core.model.*
 import android.content.Context
 import gay.benjifox.foxyphotos.core.database.SharedPreferencesUploadedContentLedger
 import gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner
@@ -14,6 +15,8 @@ internal class AndroidBackupWork(private val context: Context) {
         progress: (BackupSnapshot) -> Unit,
         shouldPause: () -> Boolean,
     ): BackupRunResult {
+        val diagnostics = AppDiagnostics.get(context)
+        diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, DiagnosticStep.SCAN))
         val policy = AndroidBackupPolicy(context)
         val credentialStore = AndroidKeystoreCredentialStore(context.applicationContext)
         val ledger = SharedPreferencesUploadedContentLedger(context.applicationContext)
@@ -33,6 +36,7 @@ internal class AndroidBackupWork(private val context: Context) {
                 policy.storeRequest(snapshot.map { it.uri.toString() }.toSet())
                 snapshot
             }
+            diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, DiagnosticStep.PLAN, count = media.size, failed = unavailable))
             // Removed folders never remain eligible on a later resume.
             policy.storeRequest(media.map { it.uri.toString() }.toSet(), explicit = policy.allowedFolders() == null)
             var currentItem: String? = null
@@ -41,6 +45,7 @@ internal class AndroidBackupWork(private val context: Context) {
             fun report(phase: BackupPhase) = progress(BackupSnapshot(phase = phase, counts = counts, total = media.size))
             val result = runBackup(
                 items = media,
+                diagnostics = diagnostics,
                 hash = { item -> currentItem = item.uri.toString(); currentFolder = item.relativePath; report(BackupPhase.HASHING); scanner.hash(item) },
                 isCommitted = { ledger.contains(it.sha256) },
                 upload = { item, hashed ->
@@ -74,6 +79,9 @@ internal class AndroidBackupWork(private val context: Context) {
             ).let { it.copy(counts = it.counts.copy(failed = it.counts.failed + unavailable)) }
             if (policy.prefs.getBoolean("override-batch", false) && (result.counts.failed > 0 || result.counts.uncertain > 0)) policy.endOverride()
             if (!result.paused) policy.finish()
+            diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP,
+                if (!result.paused) DiagnosticStep.COMPLETE else if (policy.paused()) DiagnosticStep.USER_PAUSE else DiagnosticStep.CONDITION_WAIT,
+                count = result.counts.uploaded + result.counts.alreadyPresent, failed = result.counts.failed, uncertain = result.counts.uncertain))
             return result.copy(waiting = result.paused && !policy.paused())
         } finally { secret.fill(0) }
     }

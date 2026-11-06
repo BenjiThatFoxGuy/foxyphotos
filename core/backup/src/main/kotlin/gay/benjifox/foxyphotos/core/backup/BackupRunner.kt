@@ -1,5 +1,6 @@
 package gay.benjifox.foxyphotos.core.backup
 
+import gay.benjifox.foxyphotos.core.model.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -39,18 +40,26 @@ suspend fun <Item, Hash> runBackup(
     recordCommitted: (Hash, String) -> Unit,
     shouldPause: () -> Boolean = { false },
     onProgress: (BackupCounts) -> Unit = {},
+    diagnostics: DiagnosticSink = DiagnosticSink.NONE,
 ): BackupRunResult {
     var counts = BackupCounts()
+    fun emit(step: DiagnosticStep) = diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, step,
+        count = counts.uploaded + counts.alreadyPresent, failed = counts.failed, uncertain = counts.uncertain))
+    var hashedOnce = false
+    var admittedOnce = false
+    emit(DiagnosticStep.PLAN)
     for (item in items) {
         currentCoroutineContext().ensureActive()
         if (shouldPause()) return BackupRunResult(counts, paused = true)
         try {
+            if (!hashedOnce) { hashedOnce = true; emit(DiagnosticStep.HASH) }
             val hashed = hash(item)
             if (isCommitted(hashed)) {
                 counts = counts.copy(alreadyPresent = counts.alreadyPresent + 1)
             } else {
                 // Hashing can outlast a network transition or a temporary exception.
                 if (shouldPause()) return BackupRunResult(counts, paused = true)
+                if (!admittedOnce) { admittedOnce = true; emit(DiagnosticStep.ADMISSION) }
                 when (val result = upload(item, hashed)) {
                     is BackupUploadResult -> {
                         currentCoroutineContext().ensureActive()
@@ -58,17 +67,20 @@ suspend fun <Item, Hash> runBackup(
                         counts = if (result.alreadyPresent) counts.copy(alreadyPresent = counts.alreadyPresent + 1)
                         else counts.copy(uploaded = counts.uploaded + 1)
                     }
-                    BackupItemOutcome.Deferred -> return BackupRunResult(counts, paused = true, waiting = true)
+                    BackupItemOutcome.Deferred -> { emit(DiagnosticStep.CONDITION_WAIT); return BackupRunResult(counts, paused = true, waiting = true) }
                     BackupItemOutcome.Uncertain -> counts = counts.copy(uncertain = counts.uncertain + 1)
                     BackupItemOutcome.Failed -> counts = counts.copy(failed = counts.failed + 1)
                 }
             }
         } catch (cancelled: CancellationException) {
+            emit(DiagnosticStep.CANCELLED)
             throw cancelled
         } catch (_: Exception) {
             counts = counts.copy(failed = counts.failed + 1)
         }
         onProgress(counts)
     }
-    return BackupRunResult(counts, paused = shouldPause())
+    val paused = shouldPause()
+    if (!paused) emit(DiagnosticStep.COMPLETE)
+    return BackupRunResult(counts, paused = paused)
 }

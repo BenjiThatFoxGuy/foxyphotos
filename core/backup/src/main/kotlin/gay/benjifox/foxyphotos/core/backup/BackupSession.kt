@@ -1,5 +1,6 @@
 package gay.benjifox.foxyphotos.core.backup
 
+import gay.benjifox.foxyphotos.core.model.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -30,12 +31,26 @@ class BackupSession(
     private val state: MutableStateFlow<BackupSnapshot>,
     private val work: suspend ((BackupSnapshot) -> Unit, () -> Boolean) -> BackupRunResult,
     private val changed: (BackupSnapshot) -> Unit = {},
+    private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
 ) {
     private var job: Job? = null
     private var pauseRequested = false
     private var ownedRunId: String? = null
     private var cancellationPhase = BackupPhase.CANCELLED
     private fun publish(value: BackupSnapshot) {
+        if (state.value.phase != value.phase) {
+            val step = when (value.phase) {
+                BackupPhase.SCANNING -> DiagnosticStep.SCAN
+                BackupPhase.PAUSING, BackupPhase.PAUSED -> DiagnosticStep.USER_PAUSE
+                BackupPhase.WAITING -> DiagnosticStep.CONDITION_WAIT
+                BackupPhase.CANCELLED, BackupPhase.CANCELLING -> DiagnosticStep.CANCELLED
+                BackupPhase.ERRORS, BackupPhase.TIMED_OUT -> DiagnosticStep.FAILED
+                BackupPhase.COMPLETED -> DiagnosticStep.COMPLETE
+                else -> null
+            }
+            if (step != null) diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, step,
+                count = value.counts.uploaded + value.counts.alreadyPresent, failed = value.counts.failed, uncertain = value.counts.uncertain))
+        }
         state.value = value
         // A notification or observer failure must never change upload outcomes.
         try { changed(value) } catch (_: Exception) { }
