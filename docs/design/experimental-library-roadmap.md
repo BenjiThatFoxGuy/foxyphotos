@@ -6,6 +6,12 @@
 
 This is **future scope**, not a prerequisite for the manual rclone-style session import or this goal's completion. If a bounded investigation yields a proven safe implementation, it may be proposed as a separate follow-up slice; do not derail the active roadmap or claim this flow exists from a login screen alone. Preserve manual import as fallback. User enters Apple credentials/2FA directly into the genuine Apple page; never intercept passwords, bypass browser isolation or log session cookies. Store captured session material only through encrypted provider credentials. Account for cancelled login, expired sessions, cookie updates and replacement. The external project's name/path is not yet identified in this plan; retrieve it when implementing rather than guess.
 
+## PINNED polish feedback: one integrated main library
+
+Benji clarifies that enabling a combined-library toggle must change the MAIN library from local-only to an integrated local/cloud timeline, not require opening a separate gallery destination. Recent Google Photos items should appear intermixed chronologically with local photos, following the existing mockup direction; enabling iCloud extends that same library. Keep provider identity/backup marks and source filtering intelligible; merge only proven equivalents. The separate experimental screen is a temporary prototype surface, not the final product navigation. Recover the mockups or request them at the polish pass if unavailable; do not invent their precise appearance.
+
+Sequence explicitly remains FEATURES FIRST. Record this as an acceptance requirement for the later integration/polish pass, not permission to interrupt the currently running cleanup implementation or restart UI work now. Benji is home and will provide direct feedback. Preserve default-off experiment gating and intentional Simple-mode behavior.
+
 ## Execution contract
 
 Use Codex CLI for implementation and CI iteration. Hermes supervises milestones, verifies exact artifacts, and delivers signed release nightlies on Telegram. Do not run local Gradle, download an Android SDK, or recreate dependency caches on this disk-constrained host. No repeated review fan-out. Keep commits small and preserve source portability: platform-neutral policy/provider contracts in core, Android UI/storage/install adapters on Android. No iOS implementation now.
