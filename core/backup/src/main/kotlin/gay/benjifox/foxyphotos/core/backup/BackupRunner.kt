@@ -11,7 +11,7 @@ data class BackupCounts(
     val uncertain: Int = 0,
 )
 
-data class BackupRunResult(val counts: BackupCounts, val paused: Boolean = false) {
+data class BackupRunResult(val counts: BackupCounts, val paused: Boolean = false, val waiting: Boolean = false) {
     fun summary(): String {
         val status = when {
             paused -> "Backup paused"

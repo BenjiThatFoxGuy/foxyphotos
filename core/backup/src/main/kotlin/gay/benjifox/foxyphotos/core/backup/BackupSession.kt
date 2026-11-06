@@ -11,7 +11,7 @@ enum class BackupPhase(val title: String, val active: Boolean = false) {
     IDLE("Backup ready"), SCANNING("Scanning for backup", true),
     HASHING("Hashing for backup", true), UPLOADING("Backing up", true),
     PAUSING("Pausing after current item", true), CANCELLING("Stopping backup", true), PAUSED("Backup paused"),
-    COMPLETED("Backup complete"), ERRORS("Backup stopped with errors"),
+    WAITING("Waiting for backup conditions"), COMPLETED("Backup complete"), ERRORS("Backup stopped with errors"),
     CANCELLED("Backup cancelled"), TIMED_OUT("Backup stopped: time limit"),
 }
 
@@ -56,6 +56,7 @@ class BackupSession(
                 }, { pauseRequested })
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (state.value.runId == runId) publish(state.value.copy(counts = result.counts, phase = when {
+                    result.waiting -> BackupPhase.WAITING
                     result.paused -> BackupPhase.PAUSED
                     result.counts.failed > 0 || result.counts.uncertain > 0 -> BackupPhase.ERRORS
                     else -> BackupPhase.COMPLETED

@@ -14,6 +14,7 @@ internal class AndroidBackupWork(private val context: Context) {
         progress: (BackupSnapshot) -> Unit,
         shouldPause: () -> Boolean,
     ): BackupRunResult {
+        val policy = AndroidBackupPolicy(context)
         val credentialStore = AndroidKeystoreCredentialStore(context.applicationContext)
         val ledger = SharedPreferencesUploadedContentLedger(context.applicationContext)
         val scanner = MediaStoreFolderScanner(context.contentResolver)
@@ -23,12 +24,19 @@ internal class AndroidBackupWork(private val context: Context) {
             ?: throw IllegalStateException("Missing credential")
         try {
             val credential = GoogleCredentialParser.parse(secret.decodeToString())
-            val media = scanner.scanSelectedFolders(selected)
+            val requested = policy.request()
+            val media = if (requested != null) scanner.scanSelectedItems(requested) else {
+                val snapshot = scanner.scanSelectedFolders(selected)
+                policy.prefs.edit().putStringSet("request-items", snapshot.map { it.uri.toString() }.toSet())
+                    .putBoolean("request-pending", true).commit()
+                snapshot
+            }
+            var currentItem: String? = null
             var counts = BackupCounts()
             fun report(phase: BackupPhase) = progress(BackupSnapshot(phase = phase, counts = counts, total = media.size))
-            return runBackup(
+            val result = runBackup(
                 items = media,
-                hash = { item -> report(BackupPhase.HASHING); scanner.hash(item) },
+                hash = { item -> currentItem = item.uri.toString(); report(BackupPhase.HASHING); scanner.hash(item) },
                 isCommitted = { ledger.contains(it.sha256) },
                 upload = { item, hashed ->
                     report(BackupPhase.UPLOADING)
@@ -51,9 +59,11 @@ internal class AndroidBackupWork(private val context: Context) {
                     }
                 },
                 recordCommitted = { hashed, key -> ledger.recordCommitted(hashed.sha256, key) },
-                shouldPause = shouldPause,
+                shouldPause = { shouldPause() || policy.reasons(currentItem).isNotEmpty() },
                 onProgress = { counts = it; report(BackupPhase.HASHING) },
             )
+            if (!result.paused) policy.finish()
+            return result.copy(waiting = result.paused && !policy.paused())
         } finally { secret.fill(0) }
     }
 

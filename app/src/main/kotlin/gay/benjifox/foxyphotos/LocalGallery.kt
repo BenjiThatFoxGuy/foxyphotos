@@ -151,7 +151,23 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
     }
 
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    var selecting by rememberSaveable { mutableStateOf(false) }
+    var selectedIds by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    var selectionError by remember { mutableStateOf<String?>(null) }
+    fun backup(ids: Set<String>) {
+        if (AndroidBackupPolicy(context).requestItems(ids)) {
+            selectionError = null
+            selectedIds = arrayListOf()
+            selecting = false
+            BackupRuntime.command(context, BackupService.START)
+        } else selectionError = "Backup busy. Selection kept; finish or cancel the current request first."
+    }
     Column(modifier) {
+        Row {
+            TextButton(onClick = { selecting = !selecting }) { Text(if (selecting) "Done selecting" else "Select") }
+            if (selecting) TextButton(enabled = selectedIds.isNotEmpty(), onClick = { backup(selectedIds.toSet()) }) { Text("Back up selected (${selectedIds.size})") }
+        }
+        selectionError?.let { Text(it) }
         if (!full && accessible) Text("Showing only photos and videos you allow.", Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
         if (!accessible || !full) TextButton(onClick = onPermission) { Text("Allow photos access") }
         if (status.isNotEmpty()) Text(status, Modifier.padding(16.dp))
@@ -162,7 +178,14 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
             media.groupBy { Instant.ofEpochMilli(it.timestampMillis).atZone(zone).toLocalDate() }.forEach { (date, entries) ->
                 item(key = "date:$date", span = { GridItemSpan(maxLineSpan) }) { Text(date.format(formatter), Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall) }
                 items(entries, key = { it.uri.toString() }) { entry ->
-                    Box(Modifier.aspectRatio(1f).clickable { selected = entry.uri.toString() }) { MediaImage(entry) }
+                    Box(Modifier.aspectRatio(1f).clickable {
+                        val id = entry.uri.toString()
+                        if (selecting) selectedIds = ArrayList(if (id in selectedIds) selectedIds - id else selectedIds + id)
+                        else selected = id
+                    }) {
+                        MediaImage(entry)
+                        if (selecting) Checkbox(entry.uri.toString() in selectedIds, onCheckedChange = null)
+                    }
                 }
             }
         }
@@ -179,7 +202,11 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
                 }, onRelease = { it.stopPlayback() })
                 else MediaImage(entry, large = true)
             }
-            TextButton(onClick = { selected = null }, modifier = Modifier.statusBarsPadding()) { Text("Close") }
+            Row(Modifier.statusBarsPadding()) {
+                TextButton(onClick = { selected = null }) { Text("Close") }
+                TextButton(onClick = { backup(setOf(media[pager.currentPage].uri.toString())) }) { Text("Back up") }
+                selectionError?.let { Text(it) }
+            }
         }
     }
 }

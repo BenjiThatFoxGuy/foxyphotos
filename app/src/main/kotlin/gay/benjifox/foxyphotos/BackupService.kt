@@ -16,6 +16,13 @@ internal object BackupRuntime {
     val mutableState = MutableStateFlow(BackupSnapshot())
     val state = mutableState.asStateFlow()
     fun command(context: Context, action: String) {
+        val policy = AndroidBackupPolicy(context)
+        if (action == BackupService.PAUSE) policy.pause(null)
+        if (action == BackupService.RESUME) policy.resume()
+        if (action == BackupService.CANCEL) {
+            policy.finish()
+            if (BackupExecution.cancelJob()) return
+        }
         val intent = Intent(context, BackupService::class.java).setAction(action)
             .putExtra(BackupService.RUN_ID, state.value.runId)
         try {
@@ -44,12 +51,13 @@ internal open class BackupService : Service() {
         val state = BackupRuntime.state.value
         val runId = intent?.getStringExtra(RUN_ID)
         when (intent?.action) {
-            START -> if (!state.active) session.start(UUID.randomUUID().toString())
-            RESUME -> if (!state.active && state.phase == BackupPhase.PAUSED && runId == state.runId) {
+            START -> if (!state.active && BackupExecution.acquire(this)) session.start(UUID.randomUUID().toString())
+            RESUME -> if (!state.active && state.phase == BackupPhase.PAUSED && runId == state.runId && BackupExecution.acquire(this)) {
+                AndroidBackupPolicy(this).resume()
                 session.start(UUID.randomUUID().toString())
             }
-            PAUSE -> if (runId != null) session.pause(runId)
-            CANCEL -> if (runId != null) session.cancel(runId)
+            PAUSE -> if (runId != null && runId == state.runId) { AndroidBackupPolicy(this).pause(null); session.pause(runId) }
+            CANCEL -> if (runId != null && runId == state.runId) { AndroidBackupPolicy(this).finish(); session.cancel(runId) }
         }
         if (!BackupRuntime.state.value.active) stopSelf(startId)
         return START_NOT_STICKY
@@ -58,10 +66,11 @@ internal open class BackupService : Service() {
     internal open fun buildNotification(state: BackupSnapshot): android.app.Notification = notifications.build(state)
 
     private fun publish(state: BackupSnapshot) {
-        getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-            .putBoolean("paused", state.phase == BackupPhase.PAUSING || state.phase == BackupPhase.PAUSED ||
-                state.phase == BackupPhase.CANCELLED || state.phase == BackupPhase.TIMED_OUT || state.phase == BackupPhase.ERRORS)
-            .apply()
+        if (!state.active) {
+            BackupExecution.release(this)
+            if (state.phase == BackupPhase.ERRORS || state.phase == BackupPhase.CANCELLED || state.phase == BackupPhase.TIMED_OUT) AndroidBackupPolicy(this).finish()
+            BackupScheduling.refresh(this, false)
+        }
         if (destroying) return
         if (state.active) {
             if (!foreground) {
@@ -111,6 +120,7 @@ internal open class BackupService : Service() {
         destroying = true
         val wasActive = BackupRuntime.state.value.active
         session.close()
+        BackupExecution.release(this)
         serviceScope.cancel()
         if (wasActive || foreground) {
             stopForeground(STOP_FOREGROUND_REMOVE)

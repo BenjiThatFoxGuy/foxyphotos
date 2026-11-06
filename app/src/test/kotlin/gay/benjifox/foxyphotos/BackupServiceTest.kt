@@ -81,14 +81,14 @@ class BackupServiceTest {
         assertEquals(1, BackupRuntime.state.value.counts.uploaded)
         val pausedNotification = manager.activeNotifications.single().notification
         assertEquals(0, pausedNotification.flags and Notification.FLAG_ONGOING_EVENT)
-        assertTrue(service.getSharedPreferences(BackupService.SETTINGS, 0).getBoolean("paused", false))
+        assertTrue(AndroidBackupPolicy(service).paused())
         val resume = shadowOf(pausedNotification.actions.single().actionIntent).savedIntent
         first.destroy()
         val second = Robolectric.buildService(HeldService::class.java).create()
         second.get().onStartCommand(resume, 0, 3)
         assertTrue(BackupRuntime.state.value.active)
         assertNotEquals(oldRun, BackupRuntime.state.value.runId)
-        assertFalse(second.get().getSharedPreferences(BackupService.SETTINGS, 0).getBoolean("paused", true))
+        assertFalse(AndroidBackupPolicy(second.get()).paused())
         val cancel = manager.activeNotifications.single().notification.actions.first { it.title == "Cancel" }
         second.get().onStartCommand(shadowOf(cancel.actionIntent).savedIntent, 0, 4)
         assertEquals(BackupPhase.CANCELLED, BackupRuntime.state.value.phase)

@@ -87,6 +87,7 @@ private fun FoxyPhotosApp() {
     fun selectMode(value: String) {
         mode = value
         preferences.edit().putString("app-mode", value).apply()
+        BackupScheduling.refresh(context)
     }
     val scanner = remember { MediaStoreFolderScanner(context.contentResolver) }
     val scope = rememberCoroutineScope()
@@ -120,6 +121,7 @@ private fun FoxyPhotosApp() {
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationsEnabled = notificationsAllowed()
                 mediaGranted = hasMediaAccess(context)
+                BackupScheduling.refresh(context, false)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -289,7 +291,7 @@ private fun FoxyPhotosApp() {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(enabled = backupState.phase != BackupPhase.PAUSING && backupState.phase != BackupPhase.CANCELLING &&
                         (isRunning || selectedFolders.isNotEmpty()), onClick = {
-                        if (isRunning) BackupRuntime.command(context, BackupService.PAUSE) else runSelectedFolderBackup()
+                        if (isRunning) BackupRuntime.command(context, BackupService.PAUSE) else { AndroidBackupPolicy(context).resume(); runSelectedFolderBackup() }
                     }) { Text(when {
                         backupState.phase == BackupPhase.PAUSING -> "Pausing…"
                         backupState.phase == BackupPhase.CANCELLING -> "Cancelling…"
@@ -302,6 +304,7 @@ private fun FoxyPhotosApp() {
                     Text("${selectedFolders.size} folders", style = MaterialTheme.typography.bodySmall)
                 }
             }
+            BackupPolicyControls()
         }
     }
     Scaffold { padding ->
@@ -322,6 +325,7 @@ private fun FoxyPhotosApp() {
                 when (screen) {
                     "settings" -> {
                         item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
+                        item { BackupConditionSettings() }
                         item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }
                         item { TextButton(onClick = { showLogs = true }) { Text("View logs...") } }
                         item { TextButton(onClick = { onboardingStep = 0; onboarding = true }) { Text("Setup") } }

@@ -51,6 +51,20 @@ class MediaStoreFolderScanner(
         }.sortedBy(LocalMedia::modifiedEpochSeconds)
     }
 
+    /** Query only the explicit URI whitelist, without expanding to containing folders. */
+    suspend fun scanSelectedItems(ids: Set<String>): List<LocalMedia> = withContext(Dispatchers.IO) {
+        ids.map { raw ->
+            val uri = Uri.parse(raw)
+            require(uri.scheme == "content" && uri.authority == "media")
+            val columns = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.RELATIVE_PATH)
+            contentResolver.query(uri, columns, "${MediaStore.MediaColumns.IS_PENDING} = 0", null, null)?.use { c ->
+                check(c.moveToFirst()) { "Selected media unavailable" }
+                LocalMedia(uri, c.getString(0), c.getLong(1), c.getLong(2), c.getString(3) ?: "")
+            } ?: throw IllegalStateException("Selected media unavailable")
+        }
+    }
+
     suspend fun hash(media: LocalMedia): HashedMedia = withContext(Dispatchers.IO) {
         val sha1 = MessageDigest.getInstance("SHA-1")
         val sha256 = MessageDigest.getInstance("SHA-256")
