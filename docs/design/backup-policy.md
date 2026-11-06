@@ -29,6 +29,16 @@ Status: brainstorming only. Do not implement scheduling or overrides as part of 
 - Neither scope can include media outside the selected folders or bypass explicit user pause, permissions, authentication, provider failures, or OS restrictions. These are backup-policy exceptions, not unrestricted execution.
 - Duration and exception scope are distinct. Time expiry or batch conclusion removes the exception automatically.
 
+## Timed user pause
+
+- Offer an explicit user pause for a chosen duration, alongside an indefinite Until I resume choice. Exact presets remain to be agreed.
+- User-pause intent is separate from condition blockers and temporary condition overrides. Store the pause deadline or indefinite intent independently; do not model it as a transient network/power condition.
+- If blockers appear and later disappear during a user pause, the pause remains effective until its own expiry or explicit Resume. Condition-change events never clear it.
+- When a timed pause expires, normal mode and eligibility rules apply: Modern may resume automatic backup only if no remaining blockers; Simple never starts a new manual run merely because a timer expires. Details of resuming an already-started Simple run remain to be agreed.
+- If blockers remain at pause expiry, show waiting for those conditions, not a renewed user pause. When they later clear, Modern can become eligible normally.
+- Temporary override clocks continue during user pause. A pause expiring does not restore already-expired condition exceptions or immediate-upload windows.
+- Preserve the chosen pause deadline across UI recreation and process restart; reboot/clock behavior and background wakeup mechanics require explicit implementation design. Do not promise exact scheduling latency.
+
 ## Initial proposal and remaining detail
 
 - Keep urgency and permission separate. Immediate watching does not implicitly authorize cellular, roaming or other restricted conditions.
