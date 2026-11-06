@@ -16,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import gay.benjifox.foxyphotos.core.backup.*
 import gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner
 import gay.benjifox.foxyphotos.core.model.*
@@ -95,7 +97,7 @@ internal fun VerifiedCleanupScreen() {
             Text("Verified local cleanup", style = MaterialTheme.typography.titleLarge)
             Row {
                 Text("Enable experimental cleanup", Modifier.weight(1f))
-                Switch(enabled, onCheckedChange = {
+                Switch(enabled, modifier = Modifier.semantics { contentDescription = "Enable experimental cleanup" }, onCheckedChange = {
                     enabled = it; storage.prefs.edit().putBoolean("enabled", it).commit()
                     job?.cancel(); rows = emptyList()
                 })

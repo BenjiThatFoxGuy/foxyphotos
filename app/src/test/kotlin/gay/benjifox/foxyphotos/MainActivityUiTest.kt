@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -40,6 +41,7 @@ class MainActivityUiTest {
 
     @Before fun freshInstall() {
         val app = RuntimeEnvironment.getApplication()
+        app.getSharedPreferences("foxyphotos.cleanup", Context.MODE_PRIVATE).edit().clear().commit()
         app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
             .edit().clear().commit()
         shadowOf(app).denyPermissions(
@@ -71,6 +73,26 @@ class MainActivityUiTest {
         compose.onNodeWithText("Backup folders").assertIsDisplayed()
         compose.onNodeWithText("Clear selection").assertIsDisplayed()
         compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+    }
+
+    @Test fun cleanupStartsOffWithIndependentEmptyWhitelistAndCannotRun() {
+        val app = RuntimeEnvironment.getApplication()
+        val backup = app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+        backup.edit().putBoolean("onboarding-completed", true).putStringSet("enabled-folders", setOf("DCIM/")).commit()
+        launch()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        clickSettingsEntry("Experimental verified local cleanup")
+        compose.onNodeWithText("Verified local cleanup").assertIsDisplayed()
+        compose.onNodeWithText("Verify earlier uploads").performScrollTo().assertIsNotEnabled()
+        val cleanup = CleanupStorage(app)
+        assertFalse(cleanup.enabled())
+        org.junit.Assert.assertTrue(cleanup.folders().isEmpty())
+        compose.onNodeWithContentDescription("Enable experimental cleanup").performScrollTo().performClick()
+        org.junit.Assert.assertTrue(cleanup.enabled())
+        compose.onNodeWithText("Verify earlier uploads").performScrollTo().assertIsNotEnabled()
+        org.junit.Assert.assertEquals(setOf("DCIM/"), backup.getStringSet("enabled-folders", emptySet()))
+        assertFalse(BackupRuntime.state.value.active)
+        assertNull(shadowOf(app).nextStartedService)
     }
 
     @Test fun icloudLibraryHasIndependentDefaultOffGateAndHonestMissingSession() {
