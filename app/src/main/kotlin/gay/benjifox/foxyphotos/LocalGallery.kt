@@ -134,6 +134,7 @@ private fun MediaImage(media: GalleryMedia, large: Boolean = false, modifier: Mo
 
 // Keep translation bounded by the viewport; returning to fit always clears pan.
 internal fun boundedGalleryPan(pan: Offset, scale: Float, size: IntSize): Offset {
+    if (scale <= 1f) return Offset.Zero
     val x = size.width * (scale - 1f).coerceAtLeast(0f) / 2f
     val y = size.height * (scale - 1f).coerceAtLeast(0f) / 2f
     return Offset(pan.x.coerceIn(-x, x), pan.y.coerceIn(-y, y))
