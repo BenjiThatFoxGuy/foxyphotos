@@ -29,6 +29,15 @@ Status: brainstorming only. Do not implement scheduling or overrides as part of 
 - Neither scope can include media outside the selected folders or bypass explicit user pause, permissions, authentication, provider failures, or OS restrictions. These are backup-policy exceptions, not unrestricted execution.
 - Duration and exception scope are distinct. Time expiry or batch conclusion removes the exception automatically.
 
+## Explicit item backup
+
+- A user may manually select individual photos/videos for one-off backup even when their containing folder is not included in automatic/folder backup.
+- This is a distinct explicit item-selection request, not a condition override. It must not add the containing folder to included folders or include neighboring media.
+- Modern gallery interaction: select items, then Back up selected; a viewer can offer Back up for the current item. Selection UI and this upload path are a follow-up increment, not implemented by the initial read-only gallery.
+- The selected batch uses existing confirmed-upload deduplication, progress, pause/cancel and truthful per-file outcomes. Do not start a competing run; define admission into or after the existing run before implementation.
+- Choosing items authorizes their scope only. Network/power restrictions and any explicit user pause still apply unless separately and explicitly overridden through the agreed policy flow.
+- Media access permissions and valid provider authentication are still required. Unsupported iCloud upload remains unavailable.
+
 ## Timed user pause
 
 - Offer an explicit user pause for a chosen duration, alongside an indefinite Until I resume choice. Exact presets remain to be agreed.
