@@ -16,7 +16,24 @@ Early prototype. The current implementation target is described in [the Android 
 - Original-quality uploads
 - Durable on-device queue, retry, and truthful backup states
 
-A Hub, iCloud Photos support, remote browsing, deletion, and a backend are intentionally out of scope for v0.1.
+A Hub, iCloud Photos support, deletion, and a backend remain outside the baseline v0.1 scope.
+
+### Experimental combined library
+
+In Settings, enable **Experimental local + Google library** (off by default), then
+choose **Open combined library** or **Combined** from either app mode. The separate
+native view combines all Android-accessible local media with real Google Photos
+pages using your saved encrypted Google connection. It leaves the ordinary local
+gallery and backup controls available.
+
+The first Google page loads on entry; use **Load next Google page** for more.
+Listings can be partial: each session is limited to ten pages / 5,000 Google items.
+Source badges stay separate and do not claim duplicates or successful backup.
+Tap an item for a larger preview. Google videos currently show still previews.
+Missing connection, page failures and unavailable previews have visible retry states.
+Live account and device acceptance is pending; no remote content is fabricated.
+See [protocol research and limits](docs/research/google-combined-library.md) and the
+[standing roadmap](docs/design/experimental-library-roadmap.md).
 
 ## Background backups and live status
 

@@ -28,11 +28,31 @@ Record concrete implementation, CI evidence, delivery and remaining provider lim
 
 ## 1. Combined local + Google library
 
-Implementation in progress: separate native opt-in grid, real native protocol paging,
-local/Google badges, bounded lazy previews and safe encrypted credential access.
+Bounded read-only slice implemented at `a4d53c89ad0037eaf54e20f6254627504720cfc5`:
+separate native opt-in grid accessible from Simple/Modern, real native protocol pages,
+all accessible local media independently of backup folders, local/Google badges,
+explicit next-page controls, bounded lazy previews and encrypted credential access.
+Safe lifecycle diagnostics, retryable missing-auth/page/preview failures and visible
+partial/session limits are implemented. No synthetic remote items or filename merging.
+
+CI #79 [run 42232995176](https://github.com/BenjiThatFoxGuy/foxyphotos/actions/runs/42232995176)
+is green, including protocol fixtures, opt-in/missing-auth UI coverage, existing
+regressions and debug/release package/version/signature checks. Exact signed release
+APK (version `0.1`, code `79`) downloaded and verified with `gh attestation verify`
+against that full source digest and `.github/workflows/verify.yml`; its digest matches
+the CI report and signing-certificate fingerprint matches the parent-verified gallery APK.
+APK SHA-256: `985cdb05163dd5bf1e4b35f5afa677667fcaac0af08e82114c0d25755130eeb7`.
+Evidence is in `/home/benji/.hermes/cache/scratch/foxyphotos-combined-google/ci79/`.
+
+Remaining acceptance: live device/account listing and native-key preview resolution
+have not been exercised. Google videos have labelled still previews, no playback.
+Maximum ten requested pages / 5,000 Google items per view session, three thumbnail
+jobs, bounded network responses and session bitmap LRU. No original-byte verification,
+cleanup, album writes or delivery claim. Parent supervises acceptance and delivers.
+Milestone stays unchecked pending live acceptance and parent delivery confirmation.
 See [pinned protocol, capacity research and limits](../research/google-combined-library.md).
-CI/artifact evidence pending. No live account verification or delivery claim.
-Milestone remains unchecked until acceptance evidence is complete.
+The bclone capacity follow-up is recorded in its own `docs/research/gotohp-album-capacity.md`,
+local documentation-only commit `98cbe5c68` (not pushed); provider implementation unchanged.
 
 Research actual existing bclone Google Photos read/list/download capability before designing adapters; pin reference revisions and trace real request and response handling. Do not assume the upload adapter already supports a remote library. Use existing credentials only through authorized private storage. No bulk live account crawling without bounded operation limits. Ordinary read-only listing needed for an explicitly enabled feature is in scope; do not run destructive account operations during development.
 
