@@ -1,12 +1,9 @@
 package gay.benjifox.foxyphotos
 
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.foundation.clickable
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -14,121 +11,183 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import gay.benjifox.foxyphotos.core.media.*
-import gay.benjifox.foxyphotos.core.model.*
-import gay.benjifox.foxyphotos.core.security.AndroidKeystoreCredentialStore
-import gay.benjifox.foxyphotos.provider.contract.CredentialReference
 import gay.benjifox.foxyphotos.provider.google.*
 import kotlinx.coroutines.*
 
 @Composable
 internal fun FolderAlbumSettings(open: () -> Unit) {
     val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences(BackupService.SETTINGS, android.content.Context.MODE_PRIVATE) }
+    val prefs = remember { context.getSharedPreferences(BackupService.SETTINGS, Context.MODE_PRIVATE) }
     var enabled by remember { mutableStateOf(FolderAlbums.enabled(context)) }
     Row {
         Text("Experimental folder → Google albums", Modifier.weight(1f))
         Switch(enabled, modifier = Modifier.semantics { contentDescription = "Enable experimental folder albums" }, onCheckedChange = { enabled = it; prefs.edit().putBoolean("experimental-folder-albums", it).apply() })
     }
-    Text("Off by default. Applies only to confirmed media in admitted backup batches, including existing uploads. Exact unique titles only; equal folder names stop safely. No automatic rollover.", style = MaterialTheme.typography.bodySmall)
-    Text("Album creation and membership are separate from backup success. Requests are not proof of membership; uncertain writes are never automatically replayed.", style = MaterialTheme.typography.bodySmall)
+    Text("Off by default. Choose existing destinations below. Unmapped folders use exact unique titles. Only selected backup folders are eligible.", style = MaterialTheme.typography.bodySmall)
     Text(prefs.getString("folder-albums-status", "No album operation yet")!!, style = MaterialTheme.typography.bodySmall)
-    TextButton(onClick = open) { Text("Browse folders and Google albums") }
+    TextButton(onClick = open) { Text("Folder album destinations") }
 }
 
-/** Real native metadata listing. Content uses the provider-returned web album ID explicitly. */
+internal class AlbumMappingConnection(val account: String, val client: GoogleAlbumAccess)
+
+@JvmSynthetic
+internal suspend fun albumMappingConnection(context: Context): AlbumMappingConnection {
+    val credential = AndroidManualCopy.credential(context)
+    return AlbumMappingConnection(credential.accountEmail, GoogleLibraryClient({ credential }))
+}
+
+/** Native mapping controls. Saving is local only: no upload, membership request or backup admission. */
 @Composable
-internal fun AlbumBrowser() {
+internal fun AlbumBrowser(
+    connectionLoader: (suspend () -> AlbumMappingConnection)? = null,
+    folderLoader: (suspend () -> List<AlbumLocalFolder>)? = null,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val client = remember {
-        val store = AndroidKeystoreCredentialStore(context)
-        GoogleLibraryClient(credential = {
-            withContext(Dispatchers.IO) {
-                val bytes = store.loadCredential(CredentialReference("google-native")) ?: error("Missing Google connection")
-                try { GoogleCredentialParser.parse(bytes.decodeToString()) } finally { bytes.fill(0) }
-            }
-        })
+    var connection by remember { mutableStateOf<AlbumMappingConnection?>(null) }
+    var journal by remember { mutableStateOf<FolderAlbums?>(null) }
+    var folders by remember { mutableStateOf(emptyList<AlbumLocalFolder>()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var revision by remember { mutableIntStateOf(0) }
+    var picker by remember { mutableStateOf<AlbumLocalFolder?>(null) }
+    var clear by remember { mutableStateOf<AlbumLocalFolder?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    val selectedFolders = context.getSharedPreferences(BackupService.SETTINGS, Context.MODE_PRIVATE)
+        .getStringSet("enabled-folders", emptySet()) ?: emptySet()
+    fun refresh() {
+        loading = true; error = null
+        scope.launch {
+            try {
+                folders = folderLoader?.invoke() ?: accessibleAlbumFolders(context)
+                val loaded = withContext(Dispatchers.IO) {
+                    connectionLoader?.invoke() ?: albumMappingConnection(context)
+                }
+                connection = loaded
+                journal = withContext(Dispatchers.IO) { FolderAlbums(context, loaded.account, loaded.client) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { error = "Folders or Google connection unavailable. Check photo access and your saved connection, then retry." }
+            finally { loading = false }
+        }
     }
-    var folders by remember { mutableStateOf(emptyList<MediaFolder>()) }
+    LaunchedEffect(Unit) { refresh() }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+        item {
+            Text("Folder album destinations", style = MaterialTheme.typography.titleLarge)
+            Text("Saving a destination does not select a backup folder or start backup. Manage inclusion in Backup folders.", style = MaterialTheme.typography.bodySmall)
+            Text("Album requests remain unconfirmed. Changing or clearing a destination never replays earlier requests.", style = MaterialTheme.typography.bodySmall)
+            if (!FolderAlbums.enabled(context)) Text("Album organization is off. Enable it in Settings to apply saved destinations.")
+            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            error?.let { Text(it); TextButton(onClick = { refresh() }) { Text("Retry folders and connection") } }
+            result?.let { Text(it) }
+            if (!loading && error == null && folders.isEmpty()) Text("No accessible local folders. Check photo access.")
+        }
+        items(folders, key = { it.identity }) { folder ->
+            val saved = remember(journal, revision, folder.identity) { journal?.destination(folder.identity) }
+            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Text(folder.path, style = MaterialTheme.typography.titleMedium)
+                Text("${folder.volume} · ${folder.count} accessible items", style = MaterialTheme.typography.bodySmall)
+                Text(if (folder.path in selectedFolders) "Included in backup" else "Not selected for backup")
+                Text("Destination: ${saved?.title?.ifBlank { "Untitled album" } ?: if (journal?.destinationCleared(folder.identity) == true) "None" else "Automatic exact-title matching"}")
+                Row {
+                    TextButton(enabled = journal != null && !saving, onClick = { picker = folder }) { Text(if (saved == null) "Choose album" else "Change album") }
+                    TextButton(enabled = journal != null && !saving, onClick = { clear = folder }) { Text("Clear destination") }
+                }
+            }
+        }
+    }
+    val target = picker
+    val connected = connection
+    if (target != null && connected != null) key(target.identity, connected) {
+        GoogleDestinationPicker(connected.client, onDismiss = { if (!saving) picker = null }, saving = saving) { album ->
+            saving = true
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { journal!!.selectDestination(target.identity, album) }
+                    revision++; picker = null; result = "Destination saved. Backup selection unchanged."
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { result = "Destination could not be saved. Try again." }
+                finally { saving = false }
+            }
+        }
+    }
+    clear?.let { folder -> AlertDialog(onDismissRequest = { if (!saving) clear = null },
+        title = { Text("Clear destination?") },
+        text = { Text("Stops album organization for this folder. Backup selection and earlier request receipts are kept.") },
+        confirmButton = { TextButton(enabled = !saving, onClick = {
+            saving = true
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { journal!!.clearDestination(folder.identity) }
+                    revision++; clear = null; result = "Destination cleared. Backup selection unchanged."
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { result = "Destination could not be cleared. Try again." }
+                finally { saving = false }
+            }
+        }) { Text("Clear") } },
+        dismissButton = { TextButton(enabled = !saving, onClick = { clear = null }) { Text("Cancel") } }) }
+}
+
+@Composable
+private fun GoogleDestinationPicker(client: GoogleAlbumAccess, onDismiss: () -> Unit, saving: Boolean, onSave: (GoogleAlbum) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var albums by remember { mutableStateOf(emptyList<GoogleAlbum>()) }
     var cursor by remember { mutableStateOf<String?>(null) }
+    val seen = remember { mutableSetOf<String>() }
     var pages by remember { mutableIntStateOf(0) }
-    var ended by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("Google albums have not been loaded.") }
-    var localError by remember { mutableStateOf<String?>(null) }
-    var localItems by remember { mutableStateOf<List<LocalMedia>?>(null) }
-    var selected by remember { mutableStateOf<GalleryMedia?>(null) }
+    var ended by remember { mutableStateOf(false) }
+    var stopped by remember { mutableStateOf(false) }
+    var chosen by remember { mutableStateOf<GoogleAlbum?>(null) }
+    var message by remember { mutableStateOf("Loading Google albums…") }
     fun load() {
-        if (busy || ended || pages >= 10) return
+        if (busy || ended || stopped) return
         busy = true
         scope.launch {
             try {
-                AppDiagnostics.get(context).safelyRecord(DiagnosticEvent(DiagnosticComponent.LIBRARY, DiagnosticStep.ALBUM_PAGE))
+                AppDiagnostics.get(context).safelyRecord(gay.benjifox.foxyphotos.core.model.DiagnosticEvent(
+                    gay.benjifox.foxyphotos.core.model.DiagnosticComponent.LIBRARY, gay.benjifox.foxyphotos.core.model.DiagnosticStep.ALBUM_PAGE))
                 val page = client.albumPage(cursor)
-                val combined = (albums + page.albums).distinctBy { it.id }
-                check(combined.size <= 5000)
-                albums = combined
-                ended = page.nextCursor == null || page.nextCursor == cursor
-                if (page.nextCursor != null && page.nextCursor == cursor) message = "Repeated cursor; stopped safely."
-                else message = if (ended) "Google album listing ended." else "Partial album listing; load the next page."
-                cursor = page.nextCursor
+                val all = albums + page.albums
+                check(all.size <= 5000 && all.groupBy { it.id }.values.all { it.distinct().size == 1 })
+                albums = all.distinctBy { it.id }
                 pages++
-                if (pages == 10 && !ended) message = "Session page limit reached; listing is partial."
+                ended = page.nextCursor == null
+                stopped = !ended && (pages >= 10 || !seen.add(page.nextCursor!!))
+                cursor = page.nextCursor
+                message = when {
+                    stopped -> "Partial listing stopped safely. Close and reopen to refresh."
+                    ended && albums.isEmpty() -> "No Google albums found."
+                    ended -> "All available albums loaded."
+                    else -> "Partial listing. More albums available."
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { message = "Google albums unavailable. Check your saved connection and retry; loaded albums are kept." }
+            catch (_: Exception) { message = "Could not load Google albums. Loaded choices are kept; retry." }
             finally { busy = false }
         }
     }
-    LaunchedEffect(Unit) {
-        try { folders = MediaStoreFolderScanner(context.contentResolver).scan() }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { localError = "Local folders unavailable. Check photo access in Settings." }
-    }
-    val contents = localItems
-    if (contents != null) Column(Modifier.fillMaxSize()) {
-        TextButton(onClick = { localItems = null }) { Text("Back to albums and folders") }
-        Text("${contents.size} accessible local items")
-        LazyVerticalGrid(GridCells.Adaptive(100.dp), Modifier.weight(1f)) {
-            items(contents, key = { it.uri.toString() }) { item ->
-                val media = GalleryMedia(item.uri, item.modifiedEpochSeconds * 1000, item.uri.toString().contains("/video/"))
-                Box(Modifier.aspectRatio(1f).clickable { selected = media }) { MediaImage(media) }
-            }
-        }
-    } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
-        item { Text("Folders and Google albums", style = MaterialTheme.typography.titleLarge) }
-        item { Text("Local folders", style = MaterialTheme.typography.titleMedium); localError?.let { Text(it) } }
-        items(folders, key = { "local:${it.relativePath}" }) { folder ->
-            TextButton(onClick = { scope.launch {
-                try { localItems = MediaStoreFolderScanner(context.contentResolver).scanSelectedFolders(setOf(folder.relativePath)) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { localError = "Folder unavailable; check photo access." }
-            } }) { Text("${folder.relativePath} · ${folder.itemCount}") }
-        }
-        item {
-            Text("Google albums", style = MaterialTheme.typography.titleMedium)
-            Text("Real native album metadata. Open contents in Google Photos; in-app Google album contents are not yet supported.", style = MaterialTheme.typography.bodySmall)
+    LaunchedEffect(Unit) { load() }
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text("Choose Google album") },
+        text = { Column {
             Text(message)
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            TextButton(enabled = !busy && !ended && pages < 10, onClick = { load() }) { Text(if (pages == 0) "Load Google albums" else "Load next album page / retry") }
-            TextButton(enabled = !busy, onClick = { albums = emptyList(); cursor = null; pages = 0; ended = false; load() }) { Text("Refresh Google albums") }
-        }
-        items(albums, key = { "google:${it.id}" }) { album ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Text(album.title.ifBlank { "Untitled album" })
-                Text(album.count?.let { "$it media items" } ?: "Item count unavailable", style = MaterialTheme.typography.bodySmall)
-                if (album.webId != null) TextButton(onClick = {
-                    val url = Uri.Builder().scheme("https").authority("photos.google.com").appendPath("album").appendPath(album.webId).build()
-                    try { context.startActivity(Intent(Intent.ACTION_VIEW, url)) }
-                    catch (_: Exception) { message = "No app available to open Google Photos." }
-                }) { Text("Open album in Google Photos") }
-                else Text("Google web album link unavailable", style = MaterialTheme.typography.bodySmall)
+            LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                items(albums, key = { it.id }) { album ->
+                    Row(Modifier.fillMaxWidth()) {
+                        RadioButton(selected = chosen?.id == album.id, enabled = !saving,
+                            onClick = { chosen = album }, modifier = Modifier.semantics { contentDescription = "Select ${album.title.ifBlank { "Untitled album" }}" })
+                        Column(Modifier.weight(1f)) {
+                            Text(album.title.ifBlank { "Untitled album" })
+                            Text(album.count?.let { "$it items" } ?: "Capacity unknown", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                item { if (!ended && !stopped) TextButton(enabled = !busy && !saving, onClick = { load() }) { Text("Load more / retry") } }
             }
-        }
-    }
-    selected?.let { media -> Dialog(onDismissRequest = { selected = null }) {
-        Column { TextButton(onClick = { selected = null }) { Text("Close") }; Box(Modifier.fillMaxWidth().aspectRatio(.8f)) { MediaImage(media, large = true) } }
-    } }
+        } },
+        confirmButton = { TextButton(enabled = chosen != null && !saving, onClick = { chosen?.let(onSave) }) { Text("Save destination") } },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel") } })
 }

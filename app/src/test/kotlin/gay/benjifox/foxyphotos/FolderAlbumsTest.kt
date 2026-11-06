@@ -19,6 +19,7 @@ class FolderAlbumsTest {
         var entries = listOf(GoogleAlbum("existing", "Camera", 0, null))
         var created = 0
         var added = 0
+        var lastAlbumId: String? = null
         var loseCreate = false
         var loseAdd = false
         var partial = false
@@ -29,7 +30,7 @@ class FolderAlbumsTest {
             if (loseCreate) error("lost")
             return "created"
         }
-        override suspend fun requestMembership(albumId: String, mediaKey: String) { added++; if (loseAdd) error("lost") }
+        override suspend fun requestMembership(albumId: String, mediaKey: String) { added++; lastAlbumId = albumId; if (loseAdd) error("lost") }
     }
     @Before fun reset() {
         context = RuntimeEnvironment.getApplication()
@@ -38,6 +39,44 @@ class FolderAlbumsTest {
     private val folder = "external_primary:DCIM/Camera/"
     private suspend fun map(fake: Fake, key: String = "media", account: String = "fixture") =
         FolderAlbums(context, account, fake).associate(folder, setOf(folder), key) { true }
+    @Test fun explicitDestinationRoundTripIsIsolatedAndDoesNotAuthorizeBackup() = runBlocking {
+        val fake = Fake()
+        val engine = FolderAlbums(context, "fixture", fake)
+        engine.selectDestination(folder, GoogleAlbum("trip", "Summer holiday", 2, null))
+        assertEquals("trip", FolderAlbums(context, "fixture", fake).destination(folder)?.id)
+        assertNull(FolderAlbums(context, "other", fake).destination(folder))
+        assertNull(engine.destination("card:DCIM/Camera/"))
+        assertNull(engine.destination("external_primary:Pictures/Camera/"))
+        assertFalse(FolderAlbums.enabled(context))
+        assertTrue(context.getSharedPreferences(BackupService.SETTINGS, Context.MODE_PRIVATE).getStringSet("enabled-folders", emptySet())!!.isEmpty())
+        assertEquals(0, fake.added)
+    }
+    @Test fun explicitIdSurvivesRenameNeverRetargetsAndChangedMappingNeverReplays() = runBlocking {
+        val fake = Fake().apply { entries = listOf(GoogleAlbum("trip", "Renamed", 0, null)) }
+        val engine = FolderAlbums(context, "fixture", fake)
+        engine.selectDestination(folder, GoogleAlbum("trip", "Holiday", 0, null))
+        assertTrue(map(fake).contains("unconfirmed"))
+        assertEquals("trip", fake.lastAlbumId)
+        engine.selectDestination(folder, GoogleAlbum("other", "Camera", 0, null))
+        fake.entries = listOf(GoogleAlbum("other", "Camera", 0, null))
+        assertTrue(map(fake).contains("no replay"))
+        fake.entries = listOf(GoogleAlbum("replacement", "Camera", 0, null))
+        assertTrue(map(fake, "fresh").contains("missing"))
+        engine.clearDestination(folder)
+        assertNull(engine.destination(folder))
+        assertTrue(map(fake, "another").contains("disabled"))
+        assertEquals(1, fake.added); assertEquals(0, fake.created)
+    }
+    @Test fun clearingUncertainMappingPreservesReceipts() = runBlocking {
+        val fake = Fake().apply { loseAdd = true }
+        val engine = FolderAlbums(context, "fixture", fake)
+        engine.selectDestination(folder, fake.entries.single())
+        try { map(fake); fail() } catch (_: IllegalStateException) {}
+        engine.clearDestination(folder)
+        engine.selectDestination(folder, fake.entries.single())
+        assertTrue(map(fake).contains("no replay"))
+        assertEquals(1, fake.added)
+    }
     @Test fun defaultOffAndReuseExisting() = runBlocking {
         assertFalse(FolderAlbums.enabled(context))
         val fake = Fake()

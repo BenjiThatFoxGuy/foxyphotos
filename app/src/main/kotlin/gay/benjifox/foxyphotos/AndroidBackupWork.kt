@@ -46,7 +46,11 @@ internal class AndroidBackupWork(private val context: Context) {
             val albumClient = GoogleLibraryClient(credential = { credential })
             val folderAlbums = FolderAlbums(context, credential.accountEmail, albumClient)
             var albumChecks = 0
-            val albumFolders = media.map { albumFolderIdentity(it.uri, it.relativePath) }.toSet()
+            val actualAlbumFolders = if (!FolderAlbums.enabled(context)) emptyMap() else media.associate { item -> item.uri.toString() to try {
+                actualAlbumFolder(context, item.uri, item.relativePath)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null } }
+            val albumFolders = actualAlbumFolders.values.filterNotNull().toSet()
             var currentItem: String? = null
             var currentFolder: String? = null
             var counts = BackupCounts(failed = unavailable)
@@ -103,9 +107,9 @@ internal class AndroidBackupWork(private val context: Context) {
                 },
                 recordCommitted = { hashed, key -> ledger.recordCommitted(hashed.sha256, key) },
                 onConfirmed = { item, hashed ->
-                    val folder = albumFolderIdentity(item.uri, item.relativePath)
+                    val folder = actualAlbumFolders[item.uri.toString()]
                     val contentIdentity = hashed.sha256.joinToString("") { "%02x".format(it) }
-                    if (FolderAlbums.enabled(context) && !folderAlbums.attempted(folder, contentIdentity) && albumChecks++ < 20 && !shouldPause() && policy.reasons(item.uri.toString()).isEmpty()) {
+                    if (folder != null && FolderAlbums.enabled(context) && !folderAlbums.attempted(folder, contentIdentity) && albumChecks++ < 20 && !shouldPause() && policy.reasons(item.uri.toString()).isEmpty()) {
                         diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.LIBRARY, DiagnosticStep.ALBUM_MAPPING))
                         val message = try {
                             // The legacy upload ledger is not account-scoped. Resolve presence read-only

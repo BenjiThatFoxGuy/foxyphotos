@@ -37,6 +37,25 @@ internal class FolderAlbums(context: Context, account: String, private val clien
         error("Incomplete album enumeration")
     }
 
+    /** Explicit choices are independent of upload authorization and of immutable write receipts. */
+    fun destination(folder: String): AlbumIdentity? = get(key("explicit", folder))?.let {
+        AlbumIdentity(it, get(key("explicit-title", folder)) ?: "Saved album")
+    }
+    fun destinationCleared(folder: String) = get(key("explicit-disabled", folder)) != null
+    suspend fun selectDestination(folder: String, album: GoogleAlbum) = mutex.withLock {
+        require(album.id.isNotBlank())
+        check(prefs.edit().putString(key("explicit", folder), album.id)
+            .putString(key("explicit-title", folder), album.title)
+            .remove(key("explicit-disabled", folder)).commit())
+        cached = null
+    }
+    suspend fun clearDestination(folder: String) = mutex.withLock {
+        check(prefs.edit().remove(key("explicit", folder)).remove(key("explicit-title", folder))
+            .putString(key("explicit-disabled", folder), "true").commit())
+        // Never remove candidate/member/create/reservation records, even when a user changes their mind.
+        cached = null
+    }
+
     fun attempted(folder: String, contentIdentity: String): Boolean = get(key("candidate", "$folder\u0000$contentIdentity")) != null
 
     suspend fun associate(folder: String, knownFolders: Set<String>, mediaKey: String, contentIdentity: String = mediaKey, requestedTitle: String = folderAlbumTitle(folder), admitted: () -> Boolean): String = mutex.withLock {
@@ -44,46 +63,56 @@ internal class FolderAlbums(context: Context, account: String, private val clien
         if (operations >= 20) return@withLock "Batch album limit reached; run backup again for remaining items"
         val candidate = key("candidate", "$folder\u0000$contentIdentity")
         if (get(candidate) != null) return@withLock "Earlier album request uncertain or acknowledged; no replay"
-        val title = requestedTitle
-        if (title.isBlank() || title.length > 500 || folderTitleCollides(folder, knownFolders))
-            return@withLock "Folder title collision or unsupported title; no album write"
-        val claim = key("title", title)
-        val owner = get(claim)
-        if (owner != null && owner != digest(folder)) return@withLock "Folder title already claimed by another device folder"
-        put(claim, digest(folder))
-        val mapping = key("mapping", folder)
-        val intent = key("create", folder)
-        val list = cached ?: albums().also { cached = it }
-        val match = matchFolderAlbum(folder, title, list.map { AlbumIdentity(it.id, it.title) }, true)
-        var id = get(mapping)
-        if (id != null) {
-            if (match !is AlbumNameMatch.Existing || match.albumId != id)
-                return@withLock "Mapped album missing, renamed or ambiguous; no album write"
-        } else when (match) {
-            is AlbumNameMatch.Existing -> {
-                // A lost create response cannot be resolved from title alone (external writers may race).
-                if (get(intent) != null) return@withLock "Earlier creation uncertain; inspect Google albums before any further mapping"
-                id = match.albumId
-                put(mapping, id)
+        if (destinationCleared(folder)) return@withLock "Folder album destination disabled"
+        val explicit = destination(folder)
+        // Explicit destinations are resolved by returned ID, never by title, even after a rename.
+        val list = if (explicit != null) albums().also { cached = it } else cached ?: albums().also { cached = it }
+        val albumId = if (explicit != null) {
+            when (val target = resolveExplicitAlbum(explicit.id, list.map { AlbumIdentity(it.id, it.title) })) {
+                is ExplicitAlbumResolution.Existing -> target.albumId
+                ExplicitAlbumResolution.Missing -> return@withLock "Explicit album missing; choose another destination, no album write"
             }
-            AlbumNameMatch.Missing -> {
-                if (get(intent) != null) return@withLock "Earlier creation uncertain; automatic creation stopped"
-                if (!admitted()) return@withLock "Paused"
-                operations++
-                check(prefs.edit().putString(intent, "pending").putString(candidate, "uncertain").commit())
-                id = client.createAlbum(title, mediaKey)
-                // The create response confirms identity, not that the included item became a member.
-                // Persist identity and unresolved membership atomically before allowing another item.
-                check(prefs.edit().putString(mapping, id).putString(intent, "confirmed")
-                    .putString(key("member", "$id\u0000$mediaKey"), "acknowledged")
-                    .putString(key("reserved", id), "1").commit())
-                cached = null
-                return@withLock "Album creation confirmed; included media membership unconfirmed"
+        } else {
+            val title = requestedTitle
+            if (title.isBlank() || title.length > 500 || folderTitleCollides(folder, knownFolders))
+                return@withLock "Folder title collision or unsupported title; no album write"
+            val claim = key("title", title)
+            val owner = get(claim)
+            if (owner != null && owner != digest(folder)) return@withLock "Folder title already claimed by another device folder"
+            put(claim, digest(folder))
+            val mapping = key("mapping", folder)
+            val intent = key("create", folder)
+            val match = matchFolderAlbum(folder, title, list.map { AlbumIdentity(it.id, it.title) }, true)
+            var id = get(mapping)
+            if (id != null) {
+                if (match !is AlbumNameMatch.Existing || match.albumId != id)
+                    return@withLock "Mapped album missing, renamed or ambiguous; no album write"
+            } else when (match) {
+                is AlbumNameMatch.Existing -> {
+                    // A lost create response cannot be resolved from title alone (external writers may race).
+                    if (get(intent) != null) return@withLock "Earlier creation uncertain; inspect Google albums before any further mapping"
+                    id = match.albumId
+                    put(mapping, id)
+                }
+                AlbumNameMatch.Missing -> {
+                    if (get(intent) != null) return@withLock "Earlier creation uncertain; automatic creation stopped"
+                    if (!admitted()) return@withLock "Paused"
+                    operations++
+                    check(prefs.edit().putString(intent, "pending").putString(candidate, "uncertain").commit())
+                    id = client.createAlbum(title, mediaKey)
+                    // The create response confirms identity, not that the included item became a member.
+                    // Persist identity and unresolved membership atomically before allowing another item.
+                    check(prefs.edit().putString(mapping, id).putString(intent, "confirmed")
+                        .putString(key("member", "$id\u0000$mediaKey"), "acknowledged")
+                        .putString(key("reserved", id), "1").commit())
+                    cached = null
+                    return@withLock "Album creation confirmed; included media membership unconfirmed"
 
+                }
+                else -> return@withLock "Ambiguous album title; no album write"
             }
-            else -> return@withLock "Ambiguous album title; no album write"
+            requireNotNull(id)
         }
-        val albumId = requireNotNull(id)
         val member = key("member", "$albumId\u0000$mediaKey")
         if (get(member) != null) return@withLock "Membership previously requested; confirmation unavailable, no replay"
         val album = cached!!.singleOrNull { it.id == albumId }
