@@ -55,7 +55,7 @@ class FolderAlbumsTest {
         val fake = Fake().apply { entries = listOf(GoogleAlbum("trip", "Renamed", 0, null)) }
         val engine = FolderAlbums(context, "fixture", fake)
         engine.selectDestination(folder, GoogleAlbum("trip", "Holiday", 0, null))
-        assertTrue(map(fake).contains("unconfirmed"))
+        assertTrue(engine.associate(folder, setOf(folder, "card:Pictures/Camera/"), "media") { true }.contains("unconfirmed"))
         assertEquals("trip", fake.lastAlbumId)
         engine.selectDestination(folder, GoogleAlbum("other", "Camera", 0, null))
         fake.entries = listOf(GoogleAlbum("other", "Camera", 0, null))
