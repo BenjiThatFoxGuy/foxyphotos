@@ -42,6 +42,7 @@ class MainActivityUiTest {
     @Before fun freshInstall() {
         val app = RuntimeEnvironment.getApplication()
         app.getSharedPreferences("foxyphotos.cleanup", Context.MODE_PRIVATE).edit().clear().commit()
+        app.getSharedPreferences("foxyphotos.credentials", Context.MODE_PRIVATE).edit().clear().commit()
         app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
             .edit().clear().commit()
         shadowOf(app).denyPermissions(
@@ -200,8 +201,15 @@ class MainActivityUiTest {
             override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = 0
         })
         app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE).edit()
-            .putBoolean("onboarding-completed", true).putString("main-library-mode", "icloud").commit()
+            .putBoolean("onboarding-completed", true).putString("main-library-mode", "icloud")
+            .putStringSet("enabled-folders", setOf("DCIM/")).commit()
+        // Deliberately undecryptable fixture: presence may enable existing backup controls,
+        // but iCloud-only startup must never decrypt Google credentials or use their pages.
+        app.getSharedPreferences("foxyphotos.credentials", Context.MODE_PRIVATE).edit()
+            .putString("credential.google-native.ciphertext", "not-a-real-credential")
+            .putString("credential.google-native.iv", "not-an-iv").commit()
         val activity = launch()
+        compose.onNodeWithText("Back up").assertIsEnabled()
         compose.onNodeWithText("Refresh iCloud").assertIsDisplayed()
         controller!!.pause().stop().start().resume()
         compose.waitForIdle()

@@ -111,6 +111,7 @@ private fun FoxyPhotosApp() {
     var notificationRequested by remember { mutableStateOf(preferences.getBoolean("notification-permission-requested", false)) }
     var mediaGranted by remember { mutableStateOf(hasMediaAccess(context)) }
     var configuredAccount by remember { mutableStateOf<String?>(null) }
+    var googleBackupConfigured by remember { mutableStateOf(false) }
     var setupError by remember { mutableStateOf<String?>(null) }
     var folders by remember { mutableStateOf<List<MediaFolder>>(emptyList()) }
     var selectedFolders by remember { mutableStateOf(preferences.getStringSet("enabled-folders", emptySet()) ?: emptySet()) }
@@ -143,6 +144,8 @@ private fun FoxyPhotosApp() {
     }
 
     LaunchedEffect(libraryMode) {
+        // Presence metadata preserves backup controls without decrypting Google credentials in iCloud-only mode.
+        googleBackupConfigured = credentialStore.hasCredential(CredentialReference("google-native"))
         // iCloud-only browsing never reads Google credentials. Backup setup remains explicit.
         val savedCredential = if (libraryMode == gay.benjifox.foxyphotos.core.model.LibraryMode.ICLOUD_ONLY) null
             else credentialStore.loadCredential(CredentialReference("google-native"))
@@ -228,6 +231,7 @@ private fun FoxyPhotosApp() {
                                     googleAuthClient.exchange(parsed)
                                     credentialStore.saveCredential(CredentialReference("google-native"), secret)
                                     configuredAccount = parsed.accountEmail
+                                    googleBackupConfigured = true
                                     activityStatus = "Ready"
                                     credentialInput = ""
                                     if (onboarding) onboardingStep = 2
@@ -301,7 +305,7 @@ private fun FoxyPhotosApp() {
             if (backupState.phase != BackupPhase.IDLE) Text(
                 "${backupCounts.uploaded} uploaded · ${backupCounts.alreadyPresent} present · ${backupCounts.failed} failed · ${backupCounts.uncertain} uncertain",
                 style = MaterialTheme.typography.bodySmall)
-            if (configuredAccount == null) {
+            if (!googleBackupConfigured) {
                 TextButton(onClick = { screen = "connect" }) { Text("Connect Google Photos") }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -406,7 +410,7 @@ private fun FoxyPhotosApp() {
                         item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }
                         item { TextButton(onClick = { showLogs = true }) { Text("View logs...") } }
                         item { TextButton(onClick = { onboardingStep = 0; onboarding = true }) { Text("Setup") } }
-                        item { TextButton(onClick = { screen = "connect" }) { Text(if (configuredAccount == null) "Connect Google Photos" else "Reconnect Google Photos") } }
+                        item { TextButton(onClick = { screen = "connect" }) { Text(if (!googleBackupConfigured) "Connect Google Photos" else "Reconnect Google Photos") } }
                     }
                     "connect" -> item { credentialForm() }
                     "folders" -> {
