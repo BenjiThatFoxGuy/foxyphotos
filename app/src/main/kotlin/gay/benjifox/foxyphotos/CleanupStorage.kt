@@ -18,6 +18,8 @@ internal class CleanupStorage(private val context: Context) {
         CleanupUploadEvidence(j.getString("identity"), j.getString("folder"), j.getString("hash"),
             j.getLong("size"), j.getString("remote"), j.getString("run"), j.getLong("at"))
     } catch (_: Exception) { null } }
+    fun endRun(run: String) { check(prefs.edit().putBoolean("ended:$run", true).commit()) }
+    fun ended(run: String) = prefs.getBoolean("ended:$run", false)
     fun record(uri: Uri, e: CleanupUploadEvidence) {
         val j = JSONObject().put("identity", e.localIdentity).put("folder", e.folder).put("hash", e.sha256)
             .put("size", e.size).put("remote", e.remoteKey).put("run", e.uploadRun).put("at", e.uploadedAt)
@@ -49,7 +51,7 @@ internal class CleanupStorage(private val context: Context) {
         val hash = hash(before)
         val after = snapshot(uri)
         currentCoroutineContext().ensureActive()
-        before == after && evidence(uri) == verification.upload &&
+        before == after && ended(verification.upload.uploadRun) && evidence(uri) == verification.upload &&
             VerifiedCleanup.admit(verification, enabled(), folders(), after.identity, hash, after.size, System.currentTimeMillis())
     }
 }

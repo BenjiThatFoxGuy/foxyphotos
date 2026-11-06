@@ -109,7 +109,10 @@ internal class AndroidBackupWork(private val context: Context) {
                 if (!result.paused) DiagnosticStep.COMPLETE else if (policy.paused()) DiagnosticStep.USER_PAUSE else DiagnosticStep.CONDITION_WAIT,
                 count = result.counts.uploaded + result.counts.alreadyPresent, failed = result.counts.failed, uncertain = result.counts.uncertain))
             return result.copy(waiting = result.paused && !policy.paused())
-        } finally { secret.fill(0) }
+        } finally {
+            secret.fill(0)
+            try { cleanup.endRun(cleanupRun) } catch (_: Exception) { /* Incomplete run evidence stays ineligible. */ }
+        }
     }
 
 }

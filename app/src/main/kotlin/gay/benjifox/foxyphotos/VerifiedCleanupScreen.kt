@@ -36,6 +36,8 @@ internal fun VerifiedCleanupScreen() {
     var enabled by remember { mutableStateOf(storage.enabled()) }
     var folders by remember { mutableStateOf(storage.folders()) }
     var available by remember { mutableStateOf(emptyList<String>()) }
+    var offset by remember { mutableIntStateOf(0) }
+    var candidateCount by remember { mutableIntStateOf(0) }
     var rows by remember { mutableStateOf(emptyList<CleanupRow>()) }
     var status by remember { mutableStateOf("Choose cleanup folders independently of backup. Preview downloads up to 20 earlier uploads, at most 256 MiB each. Nothing is removed by preview.") }
     var job by remember { mutableStateOf<Job?>(null) }
@@ -110,7 +112,7 @@ internal fun VerifiedCleanupScreen() {
             Row {
                 Checkbox(folder in folders, enabled = job == null && pending == null, onCheckedChange = { checked ->
                     folders = if (checked) folders + folder else folders - folder
-                    storage.prefs.edit().putStringSet("folders", folders).commit(); rows = emptyList()
+                    storage.prefs.edit().putStringSet("folders", folders).commit(); rows = emptyList(); offset = 0; candidateCount = 0
                 })
                 Text(folder)
             }
@@ -124,9 +126,12 @@ internal fun VerifiedCleanupScreen() {
                     event(DiagnosticStep.CLEANUP_PREVIEW)
                     try {
                         val media = MediaStoreFolderScanner(context.contentResolver).scanSelectedFolders(storage.folders())
-                        val candidates = withContext(Dispatchers.IO) {
-                            media.mapNotNull { m -> storage.evidence(m.uri)?.takeIf { VerifiedCleanup.candidate(it, run, System.currentTimeMillis()) }?.let { m.uri to it } }.take(20)
+                        val allCandidates = withContext(Dispatchers.IO) {
+                            val all = media.mapNotNull { m -> storage.evidence(m.uri)?.takeIf { storage.ended(it.uploadRun) && VerifiedCleanup.candidate(it, run, System.currentTimeMillis()) }?.let { m.uri to it } }
+                            all
                         }
+                        candidateCount = allCandidates.size
+                        val candidates = allCandidates.drop(offset).take(20)
                         for ((uri, evidence) in candidates) {
                             currentCoroutineContext().ensureActive()
                             status = "Verifying ${rows.size + 1} of ${candidates.size}…"
@@ -144,12 +149,18 @@ internal fun VerifiedCleanupScreen() {
                             catch (_: Exception) { }
                             rows = rows + CleanupRow(local, verification, label)
                         }
-                        status = if (candidates.isEmpty()) "No recent earlier-run upload evidence. Allow original access, back up new items, then preview here. Old upload receipts and presence checks cannot qualify." else "Preview complete. Review each item before moving it to trash. More than 20 candidates: choose narrower folders."
+                        status = if (candidates.isEmpty()) "No recent earlier-run upload evidence. Allow original access, back up new items, then preview here. Old upload receipts and presence checks cannot qualify." else "Preview complete. Review each item before moving it to trash. Use the next page to review more candidates."
                     } catch (cancelled: CancellationException) { rows = emptyList(); status = "Cancelled. Files preserved."; throw cancelled }
                     catch (_: Exception) { rows = emptyList(); status = "Preview unavailable. Files and backup queue preserved."; event(DiagnosticStep.FAILED) }
                     finally { job = null }
                 }
             }) { Text("Verify earlier uploads") }
+            if (candidateCount > offset + 20) TextButton(enabled = job == null && pending == null, onClick = {
+                offset += 20; rows = emptyList(); status = "Next candidate page selected. Press Verify earlier uploads."
+            }) { Text("Next 20 candidates") }
+            if (offset > 0) TextButton(enabled = job == null && pending == null, onClick = {
+                offset = 0; rows = emptyList(); status = "First candidate page selected. Press Verify earlier uploads."
+            }) { Text("Start over") }
             if (job != null) TextButton(onClick = { job?.cancel() }) { Text("Cancel") }
         }
         items(rows, key = { it.local.uri.toString() }) { row ->

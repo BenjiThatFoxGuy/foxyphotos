@@ -41,10 +41,12 @@ leaves backup successful but creates no cleanup authority. Evidence records run 
 time, media identity (URI, MediaStore database version, size, modified generation,
 modified/added times, folder), exact hash and returned remote key. No such values
 are logged. MediaStore generations/database versions provide conservative identity;
-URI alone is not identity. Permission or database changes fail closed.
+URI alone is not identity. Permission or database changes fail closed. A separate
+durable run-ended marker is required: in-flight uploads and process death before
+recording the end of the upload invocation cannot qualify.
 
 A separate explicit preview run checks receipts from earlier upload runs only,
-upload age <=30 days, maximum 20 candidates per preview, 256 MiB each, 32 KiB
+upload age <=30 days, maximum 20 candidates per explicit preview page (next/start-over controls), 256 MiB each, 32 KiB
 streaming buffers, no media staging. Network has a 30-second call deadline,
 no redirects and cancellable response consumption. Verification is session-only,
 expires after 10 minutes and disappears on leaving/recreation. Receipt persistence
