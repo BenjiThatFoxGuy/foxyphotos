@@ -103,14 +103,16 @@ internal class AndroidBackupWork(private val context: Context) {
                 },
                 recordCommitted = { hashed, key -> ledger.recordCommitted(hashed.sha256, key) },
                 onConfirmed = { item, hashed ->
-                    if (FolderAlbums.enabled(context) && albumChecks++ < 20 && !shouldPause() && policy.reasons(item.uri.toString()).isEmpty()) {
+                    val folder = albumFolderIdentity(item.uri, item.relativePath)
+                    val contentIdentity = hashed.sha256.joinToString("") { "%02x".format(it) }
+                    if (FolderAlbums.enabled(context) && !folderAlbums.attempted(folder, contentIdentity) && albumChecks++ < 20 && !shouldPause() && policy.reasons(item.uri.toString()).isEmpty()) {
                         diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.LIBRARY, DiagnosticStep.ALBUM_MAPPING))
                         val message = try {
                             // The legacy upload ledger is not account-scoped. Resolve presence read-only
                             // in the current account before reusing any key for album writes.
                             val key = client.findExisting(credential, hashed.sha1)
                             if (key == null) "Upload identity unavailable; no album write" else folderAlbums.associate(
-                                albumFolderIdentity(item.uri, item.relativePath), albumFolders, key,
+                                folder, albumFolders, key, contentIdentity,
                                 admitted = { FolderAlbums.enabled(context) && !shouldPause() && policy.allowsFolder(item.relativePath) && policy.reasons(item.uri.toString()).isEmpty() })
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { "Album operation unavailable or uncertain; upload retained, no automatic write replay" }
@@ -124,6 +126,8 @@ internal class AndroidBackupWork(private val context: Context) {
                     counts = it.copy(failed = it.failed + unavailable); report(BackupPhase.HASHING)
                 },
             ).let { it.copy(counts = it.counts.copy(failed = it.counts.failed + unavailable)) }
+            if (FolderAlbums.enabled(context) && albumChecks > 20) FolderAlbums.status(context,
+                "Album pass bounded to 20 presence checks; run backup again for remaining items. Earlier requests are not replayed.")
             if (policy.prefs.getBoolean("override-batch", false) && (result.counts.failed > 0 || result.counts.uncertain > 0)) policy.endOverride()
             if (!result.paused) policy.finish()
             diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP,

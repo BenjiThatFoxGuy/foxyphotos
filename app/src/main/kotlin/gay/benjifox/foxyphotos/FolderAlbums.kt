@@ -28,15 +28,22 @@ internal class FolderAlbums(context: Context, account: String, private val clien
             result += page.albums
             check(result.size <= 5000)
             cursor = page.nextCursor
-            if (cursor == null) return result.distinctBy { it.id }
+            if (cursor == null) {
+                check(result.groupBy { it.id }.values.all { entries -> entries.distinct().size == 1 })
+                return result.distinctBy { it.id }
+            }
             check(cursors.add(cursor!!))
         }
         error("Incomplete album enumeration")
     }
 
-    suspend fun associate(folder: String, knownFolders: Set<String>, mediaKey: String, admitted: () -> Boolean): String = mutex.withLock {
+    fun attempted(folder: String, contentIdentity: String): Boolean = get(key("candidate", "$folder\u0000$contentIdentity")) != null
+
+    suspend fun associate(folder: String, knownFolders: Set<String>, mediaKey: String, contentIdentity: String = mediaKey, admitted: () -> Boolean): String = mutex.withLock {
         if (!admitted()) return@withLock "Paused"
         if (operations >= 20) return@withLock "Batch album limit reached; run backup again for remaining items"
+        val candidate = key("candidate", "$folder\u0000$contentIdentity")
+        if (get(candidate) != null) return@withLock "Earlier album request uncertain or acknowledged; no replay"
         val title = folderAlbumTitle(folder)
         if (title.isBlank() || title.length > 500 || folderTitleCollides(folder, knownFolders))
             return@withLock "Folder title collision or unsupported title; no album write"
@@ -63,7 +70,7 @@ internal class FolderAlbums(context: Context, account: String, private val clien
                 if (get(intent) != null) return@withLock "Earlier creation uncertain; automatic creation stopped"
                 if (!admitted()) return@withLock "Paused"
                 operations++
-                put(intent, "pending")
+                check(prefs.edit().putString(intent, "pending").putString(candidate, "uncertain").commit())
                 id = client.createAlbum(title, mediaKey)
                 // The create response confirms identity, not that the included item became a member.
                 // Persist identity and unresolved membership atomically before allowing another item.
@@ -86,7 +93,7 @@ internal class FolderAlbums(context: Context, account: String, private val clien
         if (!admitted()) return@withLock "Paused"
         // One atomic durable reservation + intent. Never retry an uncertain request automatically.
         operations++
-        check(prefs.edit().putString(member, "uncertain").putString(reservationKey, (reserved + 1).toString()).commit())
+        check(prefs.edit().putString(member, "uncertain").putString(candidate, "uncertain").putString(reservationKey, (reserved + 1).toString()).commit())
         client.requestMembership(albumId, mediaKey)
         put(member, "acknowledged")
         "Membership request acknowledged; remote membership unconfirmed"
