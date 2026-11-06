@@ -60,9 +60,9 @@ internal class GooglePreviewSession(val provider: ReadOnlyLibrary) {
 
 @Composable
 internal fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, large: Boolean = false, source: String = "Google") {
-    var attempt by remember(item.id) { mutableIntStateOf(0) }
-    var loading by remember(item.id, large, attempt) { mutableStateOf(true) }
-    val bitmap by produceState<Bitmap?>(null, item.id, large, attempt) {
+    var attempt by remember(session, item.id) { mutableIntStateOf(0) }
+    var loading by remember(session, item.id, large, attempt) { mutableStateOf(true) }
+    val bitmap by produceState<Bitmap?>(null, session, item.id, large, attempt) {
         try { value = session.image(item.id, large) }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { value = null }
@@ -77,11 +77,24 @@ internal fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, lar
 }
 
 @Composable
-internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = false) {
+internal fun CombinedLibrary(
+    onPermission: () -> Unit,
+    includeICloud: Boolean = false,
+    includeGoogle: Boolean = false,
+    includeLocal: Boolean = false,
+) {
+    key(includeLocal, includeGoogle, includeICloud) {
+        SelectedSourceLibrary(onPermission, includeLocal, includeGoogle, includeICloud)
+    }
+}
+
+@Composable
+private fun SelectedSourceLibrary(onPermission: () -> Unit, includeLocal: Boolean, includeGoogle: Boolean, includeICloud: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val diagnostics = remember { AppDiagnostics.get(context) }
     val session = remember {
+        if (!includeGoogle) return@remember null
         val store = AndroidKeystoreCredentialStore(context.applicationContext)
         GooglePreviewSession(GoogleLibraryClient(credential = {
             withContext(Dispatchers.IO) {
@@ -91,7 +104,7 @@ internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = 
             }
         }))
     }
-    val cloud = remember { ICloudSourceState() }
+    val cloud = remember { if (includeICloud) ICloudSourceState() else null }
     var locals by remember { mutableStateOf(emptyList<GalleryMedia>()) }
     var localStatus by remember { mutableStateOf("Loading local media…") }
     var remotes by remember { mutableStateOf(emptyList<LibraryItem>()) }
@@ -102,13 +115,13 @@ internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = 
     var stopped by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<CombinedItem?>(null) }
     fun load() {
-        if (loading || stopped || pages >= 10) return
+        if (!includeGoogle || loading || stopped || pages >= 10) return
         loading = true
         error = null
         scope.launch {
             diagnostics.record(DiagnosticEvent(DiagnosticComponent.LIBRARY, DiagnosticStep.LIBRARY_PAGE))
             try {
-                val page = session.provider.page(cursor)
+                val page = session!!.provider.page(cursor)
                 val combined = (remotes + page.items).distinctBy { it.id }
                 if (combined.size > 5000) {
                     stopped = true
@@ -134,14 +147,15 @@ internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = 
     }
     var localGeneration by remember { mutableIntStateOf(0) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(lifecycle) {
+    DisposableEffect(lifecycle, includeLocal) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) localGeneration++
+            if (includeLocal && event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) localGeneration++
         }
         lifecycle.lifecycle.addObserver(observer)
         onDispose { lifecycle.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(localGeneration) {
+        if (!includeLocal) return@LaunchedEffect
         try {
             locals = queryLocalGallery(context.contentResolver)
             localStatus = if (hasMediaAccess(context)) "Local media includes only items Android allows." else "Allow local photo access to include device media."
@@ -149,34 +163,37 @@ internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = 
         catch (_: Exception) { localStatus = "Local media unavailable. Check photo access and refresh." }
     }
     LaunchedEffect(Unit) { load() }
-    val entries = remember(locals, remotes, cloud.items) {
-        (locals.map { CombinedItem(local = it) } + remotes.map { CombinedItem(remote = it) } + cloud.items.map { CombinedItem(remote = it, source = "iCloud") })
+    val entries = remember(locals, remotes, cloud?.items) {
+        (locals.map { CombinedItem(local = it) } + remotes.map { CombinedItem(remote = it) } + cloud?.items.orEmpty().map { CombinedItem(remote = it, source = "iCloud") })
             .sortedWith(compareByDescending<CombinedItem> { it.time }.thenBy { it.key })
     }
     Column(Modifier.fillMaxSize()) {
         Column(if (includeICloud) Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()) else Modifier) {
-        Text(if (includeICloud) "Experimental · Local + Google + iCloud" else "Experimental · Local + Google Photos", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.titleMedium)
-        Text(localStatus, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
-        Text("${locals.size} local · ${remotes.size} Google loaded. Sources stay separate; Google listing may be partial.",
-            Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
-        Row {
+        if (includeLocal) {
+            Text(localStatus, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onPermission) { Text("Photo access") }
-            TextButton(enabled = !loading, onClick = {
-                remotes = emptyList(); cursor = null; pages = 0; stopped = false
-                session.cache.evictAll(); localGeneration++; load()
-            }) { Text("Refresh") }
         }
-        error?.let { Text(it, Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.error) }
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        else if (pages >= 10) Text("Session page limit reached. Refresh to start again.", Modifier.padding(12.dp))
-        else if (!stopped) TextButton(onClick = { load() }) { Text(if (error != null) "Retry Google page" else "Load next Google page") }
-        else if (error == null) Text("Google listing ended for this session.", Modifier.padding(horizontal = 12.dp))
-        if (includeICloud) ICloudLibraryControls(cloud)
+        if (includeGoogle) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${remotes.size} Google loaded · partial listing", Modifier.weight(1f).padding(start = 12.dp), style = MaterialTheme.typography.bodySmall)
+                TextButton(enabled = !loading, onClick = {
+                    selected = null
+                    remotes = emptyList(); cursor = null; pages = 0; stopped = false
+                    session?.cache?.evictAll(); load()
+                }) { Text("Refresh Google") }
+            }
+            error?.let { Text(it, Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.error) }
+            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            else if (pages >= 10) Text("Session page limit reached. Refresh to start again.", Modifier.padding(12.dp))
+            else if (!stopped) TextButton(onClick = { load() }) { Text(if (error != null) "Retry Google page" else "Load next Google page") }
+            else if (error == null) Text("Google listing ended for this session.", Modifier.padding(horizontal = 12.dp))
+        }
+        cloud?.let { ICloudLibraryControls(it) }
         }
         LazyVerticalGrid(GridCells.Adaptive(100.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(entries, key = { it.key }) { item ->
                 Box(Modifier.aspectRatio(1f).clickable { selected = item }) {
-                    item.local?.let { MediaImage(it) } ?: GooglePreview(if (item.source == "iCloud") cloud.preview!! else session, item.remote!!, source = item.source)
+                    item.local?.let { MediaImage(it) } ?: GooglePreview(if (item.source == "iCloud") cloud!!.preview!! else session!!, item.remote!!, source = item.source)
                     Text(if (item.local != null) "Local" else item.source, color = Color.White,
                         modifier = Modifier.align(Alignment.TopStart).background(Color.Black.copy(alpha = .7f)).padding(4.dp))
                 }
@@ -188,12 +205,12 @@ internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = 
             Column(Modifier.fillMaxSize().background(Color.Black)) {
                 TextButton(onClick = { selected = null }) { Text("Close") }
                 Box(Modifier.weight(1f)) {
-                    item.local?.let { MediaImage(it, large = true) } ?: GooglePreview(if (item.source == "iCloud") cloud.preview!! else session, item.remote!!, large = true, source = item.source)
+                    item.local?.let { MediaImage(it, large = true) } ?: GooglePreview(if (item.source == "iCloud") cloud!!.preview!! else session!!, item.remote!!, large = true, source = item.source)
                 }
-                if (item.source == "iCloud" && item.remote != null) cloud.preview?.let { ICloudOriginalRead(it.provider, item.remote.id) }
+                if (item.source == "iCloud" && item.remote != null) cloud?.preview?.let { ICloudOriginalRead(it.provider, item.remote.id) }
                 if (item.local?.video == true) Text("Local video thumbnail. Open Local library for playback.", color = Color.White)
             }
         }
     }
-    DisposableEffect(session) { onDispose { session.cache.evictAll() } }
+    DisposableEffect(session) { onDispose { session?.cache?.evictAll() } }
 }

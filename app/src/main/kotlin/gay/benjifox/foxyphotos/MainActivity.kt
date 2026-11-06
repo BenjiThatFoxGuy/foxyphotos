@@ -3,7 +3,6 @@ package gay.benjifox.foxyphotos
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import androidx.compose.material3.Switch
 import android.provider.Settings
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.imePadding
@@ -86,8 +85,13 @@ private fun FoxyPhotosApp() {
     val credentialStore = remember { AndroidKeystoreCredentialStore(context.applicationContext) }
     val googleAuthClient = remember { GoogleAuthClient() }
     val diagnostics = remember { AppDiagnostics.get(context) }
-    var icloudEnabled by remember { mutableStateOf(preferences.getBoolean("experimental-icloud-library", false)) }
-    var combinedEnabled by remember { mutableStateOf(preferences.getBoolean("experimental-google-library", false)) }
+    // Prototype opt-in flags intentionally do not migrate into cloud browsing authorization.
+    var libraryMode by remember { mutableStateOf(gay.benjifox.foxyphotos.core.model.LibraryMode.fromStored(
+        preferences.getString(gay.benjifox.foxyphotos.core.model.LibraryMode.PREFERENCE_KEY, null))) }
+    fun selectLibraryMode(value: gay.benjifox.foxyphotos.core.model.LibraryMode) {
+        libraryMode = value
+        preferences.edit().putString(gay.benjifox.foxyphotos.core.model.LibraryMode.PREFERENCE_KEY, value.storedValue).apply()
+    }
     var showLogs by remember { mutableStateOf(false) }
     var screen by rememberSaveable { mutableStateOf("main") }
     val gallerySavedState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
@@ -138,8 +142,10 @@ private fun FoxyPhotosApp() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(Unit) {
-        val savedCredential = credentialStore.loadCredential(CredentialReference("google-native"))
+    LaunchedEffect(libraryMode) {
+        // iCloud-only browsing never reads Google credentials. Backup setup remains explicit.
+        val savedCredential = if (libraryMode == gay.benjifox.foxyphotos.core.model.LibraryMode.ICLOUD_ONLY) null
+            else credentialStore.loadCredential(CredentialReference("google-native"))
         if (savedCredential != null) {
             try {
                 val parsed = GoogleCredentialParser.parse(savedCredential.decodeToString())
@@ -327,7 +333,7 @@ private fun FoxyPhotosApp() {
                             Text("FoxyPhotos", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
                                 if (backupState.phase == BackupPhase.IDLE) {
-                                    if (configuredAccount == null) "Not connected" else "Local library"
+                                    libraryMode.title
                                 } else backupState.phase.title,
                                 style = MaterialTheme.typography.labelSmall,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -335,8 +341,7 @@ private fun FoxyPhotosApp() {
                         }
                     },
                     actions = {
-                        if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Combined") }
-                        if (icloudEnabled) TextButton(onClick = { screen = "icloud-library" }) { Text("iCloud") }
+                        LibraryModeMenu(libraryMode, ::selectLibraryMode)
                         ProfileControl(configuredAccount, onSettings = { screen = "settings" }, backupControls = {
                             if (updateState.release != null) TextButton(onClick = { screen = "settings" }) { Text("Update available") }
                             if (backupState.total > 0) {
@@ -353,11 +358,10 @@ private fun FoxyPhotosApp() {
                 )
             } else Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (screen != "main") TextButton(onClick = { screen = if (screen == "folders" || screen == "connect") "settings" else "main" }) { Text("Back") }
-                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; "combined" -> "Combined library"; "icloud-library" -> "iCloud library"; else -> "FoxyPhotos" },
+                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; else -> "FoxyPhotos" },
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 if (screen == "main") {
-                    if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Combined") }
-                        if (icloudEnabled) TextButton(onClick = { screen = "icloud-library" }) { Text("iCloud") }
+                    LibraryModeMenu(libraryMode, ::selectLibraryMode)
                     ProfileControl(configuredAccount)
                     IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
                 }
@@ -366,14 +370,27 @@ private fun FoxyPhotosApp() {
                 Box(Modifier.weight(1f)) { AlbumBrowser() }
             } else if (screen == "cleanup") {
                 Box(Modifier.weight(1f)) { VerifiedCleanupScreen() }
-            } else if (screen == "icloud-library" && icloudEnabled) {
-                Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }, includeICloud = true) }
-            } else if (screen == "combined" && combinedEnabled) {
-                Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }) }
-            } else if (screen == "main" && mode == "Modern") {
+            } else if (screen == "main") {
+                if (mode != "Modern") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Simple", style = MaterialTheme.typography.labelLarge)
+                        controls()
+                        if (!notificationsEnabled) TextButton(onClick = {
+                            context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+                        }) { Text("Enable notifications") }
+                    }
+                }
                 Box(Modifier.weight(1f)) {
-                    gallerySavedState.SaveableStateProvider("gallery") {
-                        LocalGallery(Modifier.fillMaxSize(), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
+                    androidx.compose.runtime.key(libraryMode) {
+                        if (libraryMode.includeLocal) {
+                            gallerySavedState.SaveableStateProvider("gallery") {
+                                LocalGallery(Modifier.fillMaxSize(), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
+                            }
+                        } else CombinedLibrary(
+                            onPermission = { permissionLauncher.launch(requiredPermissions) },
+                            includeLocal = libraryMode.includeLocal, includeGoogle = libraryMode.includeGoogle,
+                            includeICloud = libraryMode.includeICloud,
+                        )
                     }
                 }
             } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -381,31 +398,9 @@ private fun FoxyPhotosApp() {
                     "settings" -> {
                         item { UpdateControls(updater) }
                         item { FolderAlbumSettings(open = { screen = "albums" }) }
-                        item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Experimental local + Google + iCloud library", Modifier.weight(1f))
-                                Switch(icloudEnabled, modifier = Modifier.semantics { contentDescription = "Enable experimental iCloud library" }, onCheckedChange = {
-                                    icloudEnabled = it
-                                    preferences.edit().putBoolean("experimental-icloud-library", it).apply()
-                                })
-                            }
-                            if (icloudEnabled) {
-                                TextButton(onClick = { screen = "icloud-library" }) { Text("Open iCloud combined library") }
-                                ICloudSessionSetup()
-                            }
-                        }
                         item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
-                        item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Experimental local + Google library", Modifier.weight(1f))
-                                Switch(combinedEnabled, modifier = Modifier.semantics { contentDescription = "Enable experimental combined library" }, onCheckedChange = {
-                                    combinedEnabled = it
-                                    preferences.edit().putBoolean("experimental-google-library", it).apply()
-                                })
-                            }
-                            Text("Read-only Google pages and previews. Off by default; uses your saved Google connection.", style = MaterialTheme.typography.bodySmall)
-                            if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Open combined library") }
-                        }
+                        item { LibraryModeChoices(libraryMode, ::selectLibraryMode) }
+                        if (libraryMode.includeICloud) item { ICloudSessionSetup() }
                         item { TextButton(onClick = { screen = "cleanup" }) { Text("Experimental verified local cleanup") } }
                         item { BackupConditionSettings() }
                         item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }
