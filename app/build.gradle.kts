@@ -68,6 +68,9 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:model"))
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.coroutines.core)
     implementation(project(":core:backup"))
     implementation(project(":core:database"))
     implementation(project(":core:media"))

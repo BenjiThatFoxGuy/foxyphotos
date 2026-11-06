@@ -1,6 +1,26 @@
 """Check the metadata and signatures of the actual APKs before upload."""
 
+import hashlib
+import json
+from urllib.parse import quote
 import os
+
+
+def release_manifest(repository, tag, filename, size, digest, badging, signatures):
+    identity = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']*)'", badging, re.M)
+    sdk = re.search(r"^sdkVersion:'(\d+)'", badging, re.M)
+    certs = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})$", signatures, re.M)
+    if not identity or not sdk or len(certs) != 1:
+        raise ValueError('Expected APK identity, minimum SDK and exactly one signing certificate')
+    package, code, name = identity.groups()
+    return {'schemaVersion': 1, 'package': package, 'versionName': name,
+            'versionCode': int(code), 'minSdk': int(sdk.group(1)), 'tag': tag,
+            'releaseUrl': f'https://github.com/{repository}/releases/tag/{quote(tag, safe="")}',
+            'releaseNotesUrl': f'https://github.com/{repository}/releases/tag/{quote(tag, safe="")}',
+            'publication': {'provider': 'github', 'channel': 'stable', 'timestampSource': 'GitHub Release published_at'},
+            'apk': {'filename': filename, 'url': f'https://github.com/{repository}/releases/download/{quote(tag, safe="")}/{quote(filename, safe="")}',
+                    'size': size, 'sha256': digest, 'signingCertificateSha256': certs[0].lower()}}
+
 from pathlib import Path
 import re
 import subprocess
@@ -36,7 +56,12 @@ def main():
         package = "gay.benjifox.foxyphotos" + (".debug" if variant == "debug" else "")
         badging = subprocess.check_output([str(tools / "aapt"), "dump", "badging", str(apk)], text=True)
         verify_badging(badging, package, code, version)
-        subprocess.run([str(tools / "apksigner"), "verify", str(apk)], check=True)
+        signatures = subprocess.check_output([str(tools / "apksigner"), "verify", "--print-certs", str(apk)], text=True)
+        if tag_build:
+            manifest = release_manifest(os.environ['GITHUB_REPOSITORY'], ref.removeprefix('refs/tags/'),
+                apk.name, apk.stat().st_size, hashlib.sha256(apk.read_bytes()).hexdigest(), badging, signatures)
+            manifest['sourceCommit'] = os.environ['GITHUB_SHA']
+            (apk.parent / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         print(f"{apk.name}: versionCode={code}, versionName={version}, package={package}, signature verified")
 
 

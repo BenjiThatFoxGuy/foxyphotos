@@ -14,7 +14,19 @@ Source implementation is ready for CI; no local Gradle build, SDK download or ne
 - [ ] CI compilation, tests and lint for this polish (parent delivery task).
 - [ ] Signed nightly delivery after authorized push (parent delivery task).
 
-Pipeline metadata/updater work remains a separate next task. No expanded cloud gallery, copied reference code/assets/strings, or license changes.
+No expanded cloud gallery, copied reference code/assets/strings, or license changes.
+
+## Step 2: release metadata and native updater
+
+Mapping and contract: [release-updater.md](release-updater.md).
+
+- [x] Source: verifier-derived versioned metadata travels with the exact tagged APK; both are attested and digest-verified as draft assets before immutable publication.
+- [x] Source: public stable GitHub release feed, Settings checks in either mode, compact profile/settings indication and default daily launch checks with opt-out.
+- [x] Source: cancellable bounded private download, portable size/hash/identity gates, Android package/signing-lineage verification and strictly increasing codes.
+- [x] Source: contextual per-source authorization, persisted/reverified ready APK and explicit system installer confirmation through a separate narrow FileProvider.
+- [x] Local: publisher/verifier Python regression suite and whitespace checks; JVM regression sources added.
+- [ ] CI: Kotlin compilation, JVM/Android tests and lint (no local Gradle or SDK/cache downloads).
+- [ ] Authorized tag publication and device installer smoke test; no new tag or release was created by this task.
 
 ## First: native gallery, modes and Settings
 

@@ -43,6 +43,12 @@ Debug builds use the debug key and the package ID `gay.benjifox.foxyphotos.debug
 
 CI reads back each APK's package ID, version code, version name, and signature before uploading it. A failed release upload stays a draft; an existing release is never overwritten automatically. Inspect/remove an incomplete draft before retrying publication. Immutable releases must remain enabled in the repository settings. Tags must point to commits containing this unified workflow; old tags are not rewritten automatically.
 
+### Native Android updates
+
+Settings in either mode includes Check for updates, a cancellable private download, and Install update. Launch checks default to once daily and can be disabled. The stable feed is the public GitHub latest-release API; the exact tagged `release-manifest.json` and APK are both attested and digest-verified before immutable publication. APK size/hash, package, newer version, minimum SDK and signing lineage are checked before Android's installer is opened. Per-source installation authorization is requested only after choosing Install; system confirmation remains required.
+
+Nightlies remain Actions artifacts: installed nightly code 66 only sees a later published tag with code greater than 66, not another nightly artifact. Existing immutable tags without metadata are not rewritten. See [release contract, safety boundaries and verification](docs/design/release-updater.md). Future F-Droid/AltStore tooling is not implemented.
+
 ### Reproducible builds and provenance
 
 Every build uploads a **reproducible build report** (`.github/repro-report.sh`) containing the commit, Gradle version, JDK, a dependency fingerprint, and the SHA-256 of each APK.

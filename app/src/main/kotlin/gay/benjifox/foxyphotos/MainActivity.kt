@@ -75,6 +75,9 @@ class MainActivity : ComponentActivity() {
 @androidx.compose.runtime.Composable
 private fun FoxyPhotosApp() {
     val context = LocalContext.current
+    val updater = remember { AppUpdater.get(context) }
+    val updateState by updater.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { updater.launchCheck() }
     val preferences = remember {
         context.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
     }
@@ -120,6 +123,7 @@ private fun FoxyPhotosApp() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                updater.onResume()
                 notificationsEnabled = notificationsAllowed()
                 mediaGranted = hasMediaAccess(context)
                 BackupScheduling.refresh(context, false)
@@ -327,6 +331,7 @@ private fun FoxyPhotosApp() {
                     },
                     actions = {
                         ProfileControl(configuredAccount, onSettings = { screen = "settings" }, backupControls = {
+                            if (updateState.release != null) TextButton(onClick = { screen = "settings" }) { Text("Update available") }
                             if (backupState.total > 0) {
                                 val processed = backupCounts.uploaded + backupCounts.alreadyPresent + backupCounts.failed + backupCounts.uncertain
                                 Text("$processed of ${backupState.total} processed", style = MaterialTheme.typography.bodySmall)
@@ -345,7 +350,7 @@ private fun FoxyPhotosApp() {
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 if (screen == "main") {
                     ProfileControl(configuredAccount)
-                    IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text("⚙", style = MaterialTheme.typography.headlineMedium) }
+                    IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
                 }
             }
             if (screen == "main" && mode == "Modern") {
@@ -353,6 +358,7 @@ private fun FoxyPhotosApp() {
             } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (screen) {
                     "settings" -> {
+                        item { UpdateControls(updater) }
                         item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
                         item { BackupConditionSettings() }
                         item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }

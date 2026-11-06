@@ -11,11 +11,18 @@ from pathlib import Path
 import subprocess
 
 
-def publish(repository, ref, apk, gh):
+def publish(repository, ref, apk, gh, manifest=None):
     if not ref.startswith("refs/tags/v") or ref == "refs/tags/v":
         raise ValueError("Publishing requires a v* tag ref")
     tag = ref.removeprefix("refs/tags/")
     digest = "sha256:" + hashlib.sha256(apk.read_bytes()).hexdigest()
+    expected = {apk.name: digest}
+    if manifest is not None:
+        metadata = json.loads(manifest.read_text())
+        if (metadata['tag'] != tag or metadata['apk']['sha256'] != digest.removeprefix('sha256:')
+                or metadata['apk']['size'] != apk.stat().st_size):
+            raise RuntimeError('Manifest does not describe the exact APK')
+        expected[manifest.name] = 'sha256:' + hashlib.sha256(manifest.read_bytes()).hexdigest()
     releases_endpoint = f"repos/{repository}/releases"
 
     def matching_releases():
@@ -30,7 +37,8 @@ def publish(repository, ref, apk, gh):
     if matching_releases():
         raise RuntimeError("Refusing to overwrite an existing release (draft or published)")
 
-    gh("release", "create", tag, str(apk), "--repo", repository,
+    files = [str(apk)] + ([str(manifest)] if manifest is not None else [])
+    gh("release", "create", tag, *files, "--repo", repository,
        "--draft", "--verify-tag", "--title", tag, "--generate-notes")
     matches = matching_releases()
     if len(matches) != 1:
@@ -44,9 +52,9 @@ def publish(repository, ref, apk, gh):
                 or release["draft"] != draft):
             raise RuntimeError("Unexpected release tag or draft state")
         assets = release["assets"]
-        if len(assets) != 1 or assets[0]["name"] != apk.name:
+        if len(assets) != len(expected) or {a['name'] for a in assets} != set(expected):
             raise RuntimeError("Expected exactly the tag-built release APK")
-        if assets[0]["state"] != "uploaded" or assets[0].get("digest") != digest:
+        if any(a['state'] != 'uploaded' or a.get('digest') != expected[a['name']] for a in assets):
             raise RuntimeError("Uploaded APK digest does not match the built APK")
         if not draft and not release.get("immutable"):
             raise RuntimeError("Published release is not immutable")
@@ -68,4 +76,5 @@ if __name__ == "__main__":
     if head != os.environ["GITHUB_SHA"]:
         raise RuntimeError("Checkout does not match the workflow commit")
     print(publish(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_REF"],
-                  Path("app/build/outputs/apk/release/app-release.apk"), run_gh))
+                  Path("app/build/outputs/apk/release/app-release.apk"), run_gh,
+                  Path("app/build/outputs/apk/release/release-manifest.json")))

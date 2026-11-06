@@ -74,6 +74,40 @@ class PublishReleaseTest(unittest.TestCase):
             raise AssertionError(f"Unexpected command: {args}")
         return self.module.publish("example/app", "refs/tags/" + tag, self.apk, gh)
 
+    def test_manifest_asset_digest_is_gated_before_publication(self):
+        manifest = self.apk.parent / 'release-manifest.json'
+        manifest.write_text(json.dumps({'tag': 'v0.2', 'apk': {
+            'sha256': self.digest.removeprefix('sha256:'), 'size': self.apk.stat().st_size}}))
+        manifest_digest = 'sha256:' + hashlib.sha256(manifest.read_bytes()).hexdigest()
+        for corrupt in (False, True):
+            calls = []
+            created = False
+            published = False
+            def release():
+                return {'id': 42, 'tag_name': 'v0.2', 'draft': not published,
+                    'immutable': published, 'html_url': 'https://example.test/v0.2',
+                    'assets': [{'name': self.apk.name, 'state': 'uploaded', 'digest': self.digest},
+                        {'name': manifest.name, 'state': 'uploaded', 'digest': 'wrong' if corrupt else manifest_digest}]}
+            def gh(*args):
+                nonlocal created, published
+                calls.append(args)
+                if args[:2] == ('release', 'create'):
+                    self.assertIn(str(manifest), args)
+                    created = True
+                    return ''
+                if '?per_page' in args[1]:
+                    return json.dumps([[release()]] if created else [[]])
+                if 'PATCH' in args:
+                    published = True
+                return json.dumps(release())
+            if corrupt:
+                with self.assertRaisesRegex(RuntimeError, 'digest'):
+                    self.module.publish('example/app', 'refs/tags/v0.2', self.apk, gh, manifest)
+                self.assertFalse(any('PATCH' in c for c in calls))
+            else:
+                self.module.publish('example/app', 'refs/tags/v0.2', self.apk, gh, manifest)
+                self.assertTrue(published)
+
     def test_refuses_existing_release_on_later_page_before_any_writes(self):
         for draft in (True, False):
             with self.subTest(draft=draft):

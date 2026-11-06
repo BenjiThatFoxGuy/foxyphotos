@@ -114,7 +114,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FoxyPhotos-release-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/release/*
           if-no-files-found: error
           retention-days: 14
 
@@ -127,6 +127,12 @@ jobs:
         with:
           subject-path: |
             app/build/outputs/apk/**/*.apk
+
+      - name: Attest release metadata
+        if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: app/build/outputs/apk/release/release-manifest.json
 
   publish:
     name: Publish immutable tag release
@@ -152,7 +158,15 @@ jobs:
           --repo "$GITHUB_REPOSITORY"
           --source-digest "$GITHUB_SHA"
           --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/verify.yml"
-      - name: Upload to draft, verify APK digest, then publish
+      - name: Verify release metadata provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh attestation verify app/build/outputs/apk/release/release-manifest.json
+          --repo "$GITHUB_REPOSITORY"
+          --source-digest "$GITHUB_SHA"
+          --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/verify.yml"
+      - name: Upload to draft, verify both asset digests, then publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/publish-release.py
