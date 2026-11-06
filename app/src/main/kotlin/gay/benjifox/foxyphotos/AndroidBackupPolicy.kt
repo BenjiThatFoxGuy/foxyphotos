@@ -35,13 +35,38 @@ internal class AndroidBackupPolicy(private val context: Context) {
     }
     fun resume() { prefs.edit().putBoolean("user-pause", false).commit(); clearTimer("pause") }
     fun request(): Set<String>? = if (prefs.contains("request-items")) prefs.getStringSet("request-items", emptySet())!!.toSet() else null
-    fun requestItems(ids: Set<String>): Boolean {
+    fun allowedFolders(): Set<String>? = if (prefs.getString("request-origin", null) == "explicit") null
+        else prefs.getStringSet("enabled-folders", emptySet())!!.toSet()
+    fun allowsFolder(path: String): Boolean = allowedFolders()?.contains(path) ?: true
+    fun storeRequest(ids: Set<String>, explicit: Boolean = false) {
+        prefs.edit().putStringSet("request-items", ids.toSet()).putBoolean("request-pending", true)
+            .putString("request-origin", if (explicit) "explicit" else "folders").commit()
+    }
+    fun completeItem(id: String, failed: Boolean = false) {
+        request()?.let { prefs.edit().putStringSet("request-items", it - id).commit() }
+        if (failed && prefs.getBoolean("override-batch", false)) endOverride()
+    }
+    fun requestItems(ids: Set<String>, explicit: Boolean = true): Boolean {
         if (BackupRuntime.state.value.active || prefs.getBoolean("request-pending", false)) return false
-        prefs.edit().putStringSet("request-items", ids.toSet()).putBoolean("request-pending", true).commit()
+        storeRequest(ids, explicit)
         return true
     }
+    suspend fun capturePendingBatch(): Set<String> {
+        val scanner = gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner(context.contentResolver)
+        val ledger = gay.benjifox.foxyphotos.core.database.SharedPreferencesUploadedContentLedger(context.applicationContext)
+        val requested = request()
+        val unavailable = mutableSetOf<String>()
+        val media = if (requested != null) scanner.scanSelectedItems(requested, allowedFolders()) { unavailable += it }
+            else scanner.scanSelectedFolders(prefs.getStringSet("enabled-folders", emptySet())!!.toSet())
+        val pending = pendingItemIds(media, { it.uri.toString() }, { scanner.hash(it).sha256.toList() },
+            { ledger.contains(it.toByteArray()) }) + unavailable
+        val authorized = media.filter { allowsFolder(it.relativePath) }.map { it.uri.toString() }.toSet() + unavailable
+        val scoped = pending.intersect(authorized)
+        val remaining = request()
+        return if (remaining != null) scoped.intersect(remaining) else if (requested == null) scoped else emptySet()
+    }
     fun finish() {
-        prefs.edit().remove("request-items").putBoolean("request-pending", false).remove("batch-override").commit()
+        prefs.edit().remove("request-items").remove("request-origin").putBoolean("request-pending", false).remove("batch-override").commit()
         if (prefs.getBoolean("override-batch", false)) endOverride()
     }
     fun endOverride() { clearTimer("override"); prefs.edit().remove("override-covered").putBoolean("override-batch", false).commit() }

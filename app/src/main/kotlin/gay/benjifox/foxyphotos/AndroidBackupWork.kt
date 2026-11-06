@@ -25,18 +25,23 @@ internal class AndroidBackupWork(private val context: Context) {
         try {
             val credential = GoogleCredentialParser.parse(secret.decodeToString())
             val requested = policy.request()
-            val media = if (requested != null) scanner.scanSelectedItems(requested) else {
+            var unavailable = 0
+            val media = if (requested != null) scanner.scanSelectedItems(requested, policy.allowedFolders()) {
+                unavailable++; policy.completeItem(it, failed = true)
+            } else {
                 val snapshot = scanner.scanSelectedFolders(selected)
-                policy.prefs.edit().putStringSet("request-items", snapshot.map { it.uri.toString() }.toSet())
-                    .putBoolean("request-pending", true).commit()
+                policy.storeRequest(snapshot.map { it.uri.toString() }.toSet())
                 snapshot
             }
+            // Removed folders never remain eligible on a later resume.
+            policy.storeRequest(media.map { it.uri.toString() }.toSet(), explicit = policy.allowedFolders() == null)
             var currentItem: String? = null
-            var counts = BackupCounts()
+            var currentFolder: String? = null
+            var counts = BackupCounts(failed = unavailable)
             fun report(phase: BackupPhase) = progress(BackupSnapshot(phase = phase, counts = counts, total = media.size))
             val result = runBackup(
                 items = media,
-                hash = { item -> currentItem = item.uri.toString(); report(BackupPhase.HASHING); scanner.hash(item) },
+                hash = { item -> currentItem = item.uri.toString(); currentFolder = item.relativePath; report(BackupPhase.HASHING); scanner.hash(item) },
                 isCommitted = { ledger.contains(it.sha256) },
                 upload = { item, hashed ->
                     report(BackupPhase.UPLOADING)
@@ -52,7 +57,7 @@ internal class AndroidBackupWork(private val context: Context) {
                         modifiedEpochSeconds = item.modifiedEpochSeconds,
                         sha1 = hashed.sha1,
                         fileType = fileType,
-                        beforeBytes = { !shouldPause() && policy.reasons(item.uri.toString()).isEmpty() },
+                        beforeBytes = { !shouldPause() && policy.allowsFolder(item.relativePath) && policy.reasons(item.uri.toString()).isEmpty() },
                         openSource = { context.contentResolver.openInputStream(item.uri) ?: throw IllegalStateException("Media unavailable") },
                     ))) {
                         is GoogleUploadOutcome.Committed -> BackupUploadResult(outcome.mediaKey)
@@ -60,9 +65,13 @@ internal class AndroidBackupWork(private val context: Context) {
                     }
                 },
                 recordCommitted = { hashed, key -> ledger.recordCommitted(hashed.sha256, key) },
-                shouldPause = { shouldPause() || policy.reasons(currentItem).isNotEmpty() },
-                onProgress = { counts = it; report(BackupPhase.HASHING) },
-            )
+                shouldPause = { shouldPause() || (currentFolder?.let { !policy.allowsFolder(it) } == true) || policy.reasons(currentItem).isNotEmpty() },
+                onProgress = {
+                    val failed = it.failed + unavailable > counts.failed || it.uncertain > counts.uncertain
+                    currentItem?.let { id -> policy.completeItem(id, failed) }
+                    counts = it.copy(failed = it.failed + unavailable); report(BackupPhase.HASHING)
+                },
+            ).let { it.copy(counts = it.counts.copy(failed = it.counts.failed + unavailable)) }
             if (policy.prefs.getBoolean("override-batch", false) && (result.counts.failed > 0 || result.counts.uncertain > 0)) policy.endOverride()
             if (!result.paused) policy.finish()
             return result.copy(waiting = result.paused && !policy.paused())

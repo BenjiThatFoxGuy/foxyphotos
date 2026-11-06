@@ -52,17 +52,39 @@ class MediaStoreFolderScanner(
     }
 
     /** Query only the explicit URI whitelist, without expanding to containing folders. */
-    suspend fun scanSelectedItems(ids: Set<String>): List<LocalMedia> = withContext(Dispatchers.IO) {
-        ids.map { raw ->
-            val uri = Uri.parse(raw)
-            require(uri.scheme == "content" && uri.authority == "media")
-            val columns = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE,
-                MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.RELATIVE_PATH)
-            contentResolver.query(uri, columns, "${MediaStore.MediaColumns.IS_PENDING} = 0", null, null)?.use { c ->
-                check(c.moveToFirst()) { "Selected media unavailable" }
-                LocalMedia(uri, c.getString(0), c.getLong(1), c.getLong(2), c.getString(3) ?: "")
-            } ?: throw IllegalStateException("Selected media unavailable")
-        }
+    @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+    suspend fun scanSelectedItems(
+        ids: Set<String>,
+        allowedFolders: Set<String>? = null,
+        onUnavailable: (String) -> Unit = {},
+    ): List<LocalMedia> = withContext(Dispatchers.IO) {
+        val signal = android.os.CancellationSignal()
+        val handle = currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion(
+            onCancelling = true, invokeImmediately = true,
+        ) { cause -> if (cause != null) signal.cancel() }
+        try {
+            buildList {
+                for (raw in ids) {
+                    currentCoroutineContext().ensureActive()
+                    try {
+                        val uri = Uri.parse(raw)
+                        require(uri.scheme == "content" && uri.authority == "media")
+                        val columns = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE,
+                            MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.RELATIVE_PATH)
+                        val item = contentResolver.query(uri, columns, "${MediaStore.MediaColumns.IS_PENDING} = 0", null, null, signal)?.use { c ->
+                            check(c.moveToFirst()) { "Selected media unavailable" }
+                            LocalMedia(uri, c.getString(0), c.getLong(1), c.getLong(2), c.getString(3)?.ifBlank { "Unsorted media" } ?: "Unsorted media")
+                        } ?: throw IllegalStateException("Selected media unavailable")
+                        currentCoroutineContext().ensureActive()
+                        if (allowedFolders == null || item.relativePath in allowedFolders) add(item)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        onUnavailable(raw)
+                    }
+                }
+            }
+        } finally { handle?.dispose() }
     }
 
     suspend fun hash(media: LocalMedia): HashedMedia = withContext(Dispatchers.IO) {

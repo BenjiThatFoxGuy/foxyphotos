@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import gay.benjifox.foxyphotos.core.backup.BackupCondition
-import gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -77,13 +76,15 @@ import kotlinx.coroutines.launch
                 dialog = ""
                 scope.launch {
                     try {
-                        val ids = if (duration == null) policy.request() ?: MediaStoreFolderScanner(context.contentResolver)
-                            .scanSelectedFolders(policy.prefs.getStringSet("enabled-folders", emptySet()) ?: emptySet()).map { it.uri.toString() }.toSet() else null
-                        if (ids != null && !BackupRuntime.state.value.active && policy.request() == null) policy.requestItems(ids)
+                        val ids = if (duration == null) policy.capturePendingBatch() else null
+                        if (ids != null && !BackupRuntime.state.value.active) {
+                            policy.storeRequest(ids, explicit = policy.allowedFolders() == null)
+                        }
                         policy.override(covered, duration, ids)
                         if (!BackupRuntime.state.value.active && !policy.paused()) BackupRuntime.command(context, BackupService.START)
                         tick++
-                    } catch (_: Exception) { error = "Could not capture backup batch" }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { error = "Could not capture backup batch" }
                 }
             }) { Text("Confirm") }
         })
