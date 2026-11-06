@@ -2,6 +2,7 @@ package gay.benjifox.foxyphotos
 
 import android.Manifest
 import android.content.Context
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -56,6 +57,23 @@ class MainActivityUiTest {
         return controller!!.get()
     }
 
+    @Test @Config(sdk = [35]) fun selectedOnlyAccessSurvivesResumeAndRecreation() {
+        val app = RuntimeEnvironment.getApplication()
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+            .edit().putBoolean("onboarding-completed", true).commit()
+        launch()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("Backup folders").performClick()
+        compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+        controller!!.pause().stop().start().resume()
+        compose.waitForIdle()
+        compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+        controller!!.recreate()
+        compose.waitForIdle()
+        compose.onNodeWithText("Allow photos access").assertDoesNotExist()
+    }
+
     @Test fun notificationsAreRequestedOnlyFromTheirSetupStep() {
         val activity = launch()
         compose.onNodeWithText("Welcome!").assertIsDisplayed()
@@ -80,13 +98,80 @@ class MainActivityUiTest {
         compose.onNodeWithText("Continue").performScrollTo().performClick()
         repeat(3) { compose.onNodeWithText("Not now").performScrollTo().performClick() }
         assertFalse(prefs.getBoolean("onboarding-completed", false))
+        compose.onNodeWithText("Simple").performScrollTo().performClick()
+        compose.onNodeWithText("Continue").performScrollTo().performClick()
         compose.onNodeWithText("Done").performScrollTo().performClick()
         org.junit.Assert.assertTrue(prefs.getBoolean("onboarding-completed", false))
-        compose.onNodeWithContentDescription("More options").performScrollTo().performClick()
+        org.junit.Assert.assertEquals("Simple", prefs.getString("app-mode", null))
+        compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithText("Setup").performClick()
         compose.onNodeWithText("Welcome!").assertIsDisplayed()
         assertFalse(BackupRuntime.state.value.active)
         assertNull(shadowOf(RuntimeEnvironment.getApplication()).nextStartedService)
+    }
+
+    @Test fun settingsSwitchPersistsModeWithoutStartingBackup() {
+        val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("onboarding-completed", true).commit()
+        launch()
+        compose.onNodeWithText("Simple").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("Modern").performClick()
+        org.junit.Assert.assertEquals("Modern", prefs.getString("app-mode", null))
+        compose.onNodeWithText("Back").performClick()
+        compose.onNodeWithText("Photo access is off").assertIsDisplayed()
+        controller!!.recreate()
+        compose.waitForIdle()
+        compose.onNodeWithText("Photo access is off").assertIsDisplayed()
+        assertNull(shadowOf(RuntimeEnvironment.getApplication()).nextStartedService)
+        assertFalse(BackupRuntime.state.value.active)
+    }
+
+    @Test fun accountDetailsAreHiddenUntilProfileTapped() {
+        val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("onboarding-completed", true).commit()
+        val activity = launch()
+        activity.setContent { ProfileControl("private@example.invalid") }
+        compose.onNodeWithText("private@example.invalid").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Account").performClick()
+        compose.onNodeWithText("private@example.invalid").assertIsDisplayed()
+    }
+
+    @Test fun folderScreenQueriesAgainOnEveryEntryWithoutStartingBackup() {
+        val app = RuntimeEnvironment.getApplication()
+        app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+            .edit().putBoolean("onboarding-completed", true).commit()
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        val queryCount = java.util.concurrent.atomic.AtomicInteger()
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("media", object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?) =
+                android.database.MatrixCursor(projection!!).apply { queryCount.incrementAndGet(); addRow(arrayOf("DCIM/Test/")) }
+            override fun getType(uri: android.net.Uri) = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
+            override fun delete(uri: android.net.Uri, selection: String?, args: Array<out String>?) = 0
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = 0
+        })
+        launch()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("Backup folders").performClick()
+        compose.waitUntil(5000) {
+            compose.waitForIdle()
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            queryCount.get() >= 2
+        }
+        compose.onNodeWithText("DCIM/Test/").assertIsDisplayed()
+        val first = queryCount.get()
+        compose.onNodeWithText("Back").performClick()
+        compose.onNodeWithText("Backup folders").performClick()
+        compose.waitUntil(5000) {
+            compose.waitForIdle()
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            queryCount.get() >= first + 2
+        }
+        compose.onNodeWithText("Refresh folders").assertDoesNotExist()
+        assertFalse(BackupRuntime.state.value.active)
+        assertNull(shadowOf(app).nextStartedService)
     }
 
     @Test fun longCredentialLeavesSaveReachableAndClickable() {

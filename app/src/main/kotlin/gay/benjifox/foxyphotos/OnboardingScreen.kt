@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun OnboardingScreen(
     step: Int,
+    mode: String,
+    onMode: (String) -> Unit,
     account: String?,
     mediaGranted: Boolean,
     notificationsEnabled: Boolean,
@@ -36,13 +38,14 @@ internal fun OnboardingScreen(
     onNotifications: () -> Unit,
     onDone: () -> Unit,
 ) {
-    val titles = listOf("Welcome!", "Connect Google Photos", "Photos access", "Get Notified!", "You're ready!")
+    val titles = listOf("Welcome!", "Connect Google Photos", "Photos access", "Get Notified!", "Make it yours", "You're ready!")
     val descriptions = listOf(
         "FoxyPhotos backs up photos and videos from your device to Google Photos.",
         "Paste your Google Photos credential to connect your account.",
         "Allow access to your photos and videos to choose folders to back up.",
         "Allow notifications to follow your backup progress.",
-        "Choose your folders, then tap Back up when you're ready.",
+        "Modern for browsing, or Simple for backup controls.",
+        "Choose backup folders in Settings, then tap Back up when you're ready.",
     )
     Scaffold { padding ->
         LazyColumn(
@@ -54,8 +57,8 @@ internal fun OnboardingScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("FoxyPhotos", style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary)
-                    Text("Step ${step + 1} of 5", style = MaterialTheme.typography.labelMedium)
-                    LinearProgressIndicator(progress = { (step + 1) / 5f }, modifier = Modifier.fillMaxWidth())
+                    Text("Step ${step + 1} of 6", style = MaterialTheme.typography.labelMedium)
+                    LinearProgressIndicator(progress = { (step + 1) / 6f }, modifier = Modifier.fillMaxWidth())
                 }
             }
             item {
@@ -99,7 +102,12 @@ internal fun OnboardingScreen(
                                 TextButton(onClick = onContinue) { Text("Not now") }
                             }
                         }
-                        4 -> Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+                        4 -> {
+                            ModeChoices(mode, onMode)
+                            Text("Modern is recommended for local photos and videos.", style = MaterialTheme.typography.bodySmall)
+                            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
+                        }
+                        5 -> Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Done") }
                     }
                     if (step > 0) TextButton(onClick = onBack, enabled = !busy) { Text("Back") }
                 }

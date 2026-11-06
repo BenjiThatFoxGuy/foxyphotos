@@ -23,10 +23,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,8 +32,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -53,8 +47,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
@@ -89,7 +81,13 @@ private fun FoxyPhotosApp() {
     val googleAuthClient = remember { GoogleAuthClient() }
     val diagnostics = remember { AppDiagnostics.get(context) }
     var showLogs by remember { mutableStateOf(false) }
-    var menuExpanded by remember { mutableStateOf(false) }
+    var screen by rememberSaveable { mutableStateOf("main") }
+    val galleryGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    var mode by remember { mutableStateOf(preferences.getString("app-mode", "Simple") ?: "Simple") }
+    fun selectMode(value: String) {
+        mode = value
+        preferences.edit().putString("app-mode", value).apply()
+    }
     val scanner = remember { MediaStoreFolderScanner(context.contentResolver) }
     val scope = rememberCoroutineScope()
     var credentialInput by remember { mutableStateOf("") }
@@ -97,7 +95,7 @@ private fun FoxyPhotosApp() {
     var onboardingStep by rememberSaveable { mutableStateOf(0) }
     var accountLoaded by remember { mutableStateOf(false) }
     var notificationRequested by remember { mutableStateOf(preferences.getBoolean("notification-permission-requested", false)) }
-    var mediaGranted by remember { mutableStateOf(false) }
+    var mediaGranted by remember { mutableStateOf(hasMediaAccess(context)) }
     var configuredAccount by remember { mutableStateOf<String?>(null) }
     var setupError by remember { mutableStateOf<String?>(null) }
     var folders by remember { mutableStateOf<List<MediaFolder>>(emptyList()) }
@@ -106,7 +104,7 @@ private fun FoxyPhotosApp() {
     val isRunning = backupState.active
     val backupCounts = backupState.counts
 
-    var activityStatus by remember { mutableStateOf("Not connected") }
+    var activityStatus by remember { mutableStateOf("Ready to connect") }
     var scanError by remember { mutableStateOf<String?>(null) }
     var savingCredential by remember { mutableStateOf(false) }
     fun notificationsAllowed() = NotificationManagerCompat.from(context).areNotificationsEnabled() &&
@@ -121,9 +119,7 @@ private fun FoxyPhotosApp() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationsEnabled = notificationsAllowed()
-                mediaGranted = (if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)).any {
-                    ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-                }
+                mediaGranted = hasMediaAccess(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -162,13 +158,15 @@ private fun FoxyPhotosApp() {
                 activityStatus = "Scanning folders…"
                 folders = scanner.scan()
                 scanError = null
-                if (selectedFolders.isEmpty() && folders.isNotEmpty()) {
+                if (!preferences.contains("enabled-folders") && folders.isNotEmpty()) {
                     persistFolders(folders.map(MediaFolder::relativePath).toSet())
                 }
                 activityStatus = "${folders.size} folders · ${folders.sumOf(MediaFolder::itemCount)} items"
             } catch (error: SecurityException) {
                 scanError = "Photo permission is required to scan folders."
                 activityStatus = "Waiting for photo permission"
+            } catch (_: IOException) {
+                scanError = "Could not load folders. Reopen to try again."
             }
         }
     }
@@ -176,7 +174,9 @@ private fun FoxyPhotosApp() {
         if (!isRunning) BackupRuntime.command(context, BackupService.START)
     }
 
-    val requiredPermissions = if (Build.VERSION.SDK_INT >= 33) {
+    val requiredPermissions = if (Build.VERSION.SDK_INT >= 34) {
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    } else if (Build.VERSION.SDK_INT >= 33) {
         arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
     } else {
         arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -184,8 +184,8 @@ private fun FoxyPhotosApp() {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
-        mediaGranted = requiredPermissions.any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
-        if (granted.values.any { it }) scanFolders() else scanError = "Photo access is off. You can try again or use Settings."
+        mediaGranted = hasMediaAccess(context)
+        if (mediaGranted) scanFolders() else scanError = "Photo access is off. You can try again or use Settings."
     }
 
     val credentialForm: @androidx.compose.runtime.Composable () -> Unit = {
@@ -234,6 +234,8 @@ private fun FoxyPhotosApp() {
         BackHandler(enabled = onboardingStep > 0) { if (!savingCredential) onboardingStep-- }
         OnboardingScreen(
             step = onboardingStep,
+            mode = mode,
+            onMode = ::selectMode,
             account = configuredAccount,
             mediaGranted = mediaGranted,
             notificationsEnabled = notificationsEnabled,
@@ -272,125 +274,84 @@ private fun FoxyPhotosApp() {
         return
     }
 
-    Scaffold { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().background(Color(0xFF101015)).padding(padding).imePadding(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item(key = "header") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        val dotColor = MaterialTheme.colorScheme.onSurface
-                        Canvas(Modifier.size(24.dp).semantics { contentDescription = "More options" }) {
-                            for (fraction in listOf(0.25f, 0.5f, 0.75f)) {
-                                drawCircle(dotColor, radius = 1.8.dp.toPx(), center = Offset(size.width / 2, size.height * fraction))
-                            }
-                        }
-                    }
-                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        DropdownMenuItem(text = { Text("Setup") }, onClick = {
-                            menuExpanded = false
-                            onboardingStep = 0
-                            onboarding = true
-                        })
-                        DropdownMenuItem(text = { Text("View logs...") }, onClick = {
-                            menuExpanded = false
-                            showLogs = true
-                        })
-                    }
-                }
-                Text("FoxyPhotos", style = MaterialTheme.typography.headlineMedium)
-            }
-            Text(
-                configuredAccount ?: "Connect Google Photos",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            }
-            if (!notificationsEnabled) {
-                item(key = "notifications") {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Notifications off", style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = {
-                            context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
-                        }) { Text("Enable") }
-                    }
-                }
-            }
-            if (configuredAccount != null) {
-                item(key = "status") {
-                    Text(if (backupState.phase == BackupPhase.IDLE) activityStatus else backupState.phase.title,
-                        style = MaterialTheme.typography.titleMedium)
-                    if (backupState.phase != BackupPhase.IDLE) {
-                        Text("${backupCounts.uploaded} uploaded · ${backupCounts.alreadyPresent} present · ${backupCounts.failed} failed · ${backupCounts.uncertain} uncertain",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-
+    BackHandler(enabled = screen != "main") { screen = if (screen == "folders" || screen == "connect") "settings" else "main" }
+    LaunchedEffect(screen) { if (screen == "folders") scanFolders() }
+    val controls: @androidx.compose.runtime.Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (backupState.phase == BackupPhase.IDLE) activityStatus else backupState.phase.title,
+                style = MaterialTheme.typography.titleMedium)
+            if (backupState.phase != BackupPhase.IDLE) Text(
+                "${backupCounts.uploaded} uploaded · ${backupCounts.alreadyPresent} present · ${backupCounts.failed} failed · ${backupCounts.uncertain} uncertain",
+                style = MaterialTheme.typography.bodySmall)
             if (configuredAccount == null) {
-                item(key = "credentials") {
-                credentialForm()
-                }
+                TextButton(onClick = { screen = "connect" }) { Text("Connect Google Photos") }
             } else {
-                item(key = "controls") {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Button(enabled = backupState.phase != BackupPhase.PAUSING && backupState.phase != BackupPhase.CANCELLING &&
-                            (isRunning || selectedFolders.isNotEmpty()), onClick = {
-                            if (isRunning) BackupRuntime.command(context, BackupService.PAUSE)
-                            else runSelectedFolderBackup()
-                        }) { Text(when {
-                            backupState.phase == BackupPhase.PAUSING -> "Pausing…"
-                            backupState.phase == BackupPhase.CANCELLING -> "Cancelling…"
-                            isRunning -> "Pause"
-                            backupState.phase == BackupPhase.PAUSED -> "Resume"
-                            else -> "Back up"
-                        }) }
-                        if (isRunning) {
-                            TextButton(enabled = backupState.phase != BackupPhase.CANCELLING,
-                                onClick = { BackupRuntime.command(context, BackupService.CANCEL) }) { Text("Cancel") }
-                        }
-                        Text("${selectedFolders.size} selected", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(enabled = backupState.phase != BackupPhase.PAUSING && backupState.phase != BackupPhase.CANCELLING &&
+                        (isRunning || selectedFolders.isNotEmpty()), onClick = {
+                        if (isRunning) BackupRuntime.command(context, BackupService.PAUSE) else runSelectedFolderBackup()
+                    }) { Text(when {
+                        backupState.phase == BackupPhase.PAUSING -> "Pausing…"
+                        backupState.phase == BackupPhase.CANCELLING -> "Cancelling…"
+                        isRunning -> "Pause"
+                        backupState.phase == BackupPhase.PAUSED -> "Resume"
+                        else -> "Back up"
+                    }) }
+                    if (isRunning) TextButton(enabled = backupState.phase != BackupPhase.CANCELLING,
+                        onClick = { BackupRuntime.command(context, BackupService.CANCEL) }) { Text("Cancel") }
+                    Text("${selectedFolders.size} folders", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+    Scaffold { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (screen != "main") TextButton(onClick = { screen = if (screen == "folders" || screen == "connect") "settings" else "main" }) { Text("Back") }
+                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; else -> "FoxyPhotos" },
+                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                if (screen == "main") {
+                    ProfileControl(configuredAccount)
+                    IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text("⚙", style = MaterialTheme.typography.headlineMedium) }
+                }
+            }
+            if (screen == "main" && mode == "Modern") {
+                Column(Modifier.padding(horizontal = 16.dp)) { controls() }
+                LocalGallery(Modifier.weight(1f), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
+            } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                when (screen) {
+                    "settings" -> {
+                        item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
+                        item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }
+                        item { TextButton(onClick = { showLogs = true }) { Text("View logs...") } }
+                        item { TextButton(onClick = { onboardingStep = 0; onboarding = true }) { Text("Setup") } }
+                        item { TextButton(onClick = { screen = "connect" }) { Text(if (configuredAccount == null) "Connect Google Photos" else "Reconnect Google Photos") } }
                     }
-                }
-                item(key = "folder-actions") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {
-                        val permitted = requiredPermissions.any {
-                            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                    "connect" -> item { credentialForm() }
+                    "folders" -> {
+                        item {
+                            Text("${selectedFolders.size} selected")
+                            TextButton(enabled = selectedFolders.isNotEmpty(), onClick = { persistFolders(emptySet()) }) { Text("Clear selection") }
+                            if (!mediaGranted) TextButton(onClick = { permissionLauncher.launch(requiredPermissions) }) { Text("Allow photos access") }
+                            scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                            if (folders.isEmpty() && scanError == null) Text("No folders available")
                         }
-                        if (permitted) scanFolders() else permissionLauncher.launch(requiredPermissions)
-                    }) { Text(if (folders.isEmpty()) "Scan folders" else "Rescan") }
-                    TextButton(enabled = selectedFolders.isNotEmpty(), onClick = { persistFolders(emptySet()) }) {
-                        Text("Clear selection")
-                    }
-                }
-                scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Text("Folders", style = MaterialTheme.typography.titleMedium)
-                }
-                if (folders.isEmpty()) {
-                    item(key = "empty") { Text("No folders loaded") }
-                } else {
-                    items(folders, key = { "folder:${it.relativePath}" }) { folder ->
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = folder.relativePath in selectedFolders,
-                                onCheckedChange = { checked ->
+                        items(folders, key = { it.relativePath }) { folder ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(folder.relativePath in selectedFolders, onCheckedChange = { checked ->
                                     persistFolders(if (checked) selectedFolders + folder.relativePath else selectedFolders - folder.relativePath)
-                                },
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(folder.relativePath, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text("${folder.itemCount} items", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                })
+                                Column(Modifier.weight(1f)) {
+                                    Text(folder.relativePath, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text("${folder.itemCount} items", style = MaterialTheme.typography.bodySmall)
+                                }
                             }
+                        }
+                    }
+                    else -> {
+                        item { Text("Simple", style = MaterialTheme.typography.labelLarge); controls() }
+                        if (!notificationsEnabled) item {
+                            TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }) { Text("Enable notifications") }
                         }
                     }
                 }
