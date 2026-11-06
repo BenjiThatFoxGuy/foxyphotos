@@ -48,6 +48,8 @@ suspend fun <Item, Hash> runBackup(
             if (isCommitted(hashed)) {
                 counts = counts.copy(alreadyPresent = counts.alreadyPresent + 1)
             } else {
+                // Hashing can outlast a network transition or a temporary exception.
+                if (shouldPause()) return BackupRunResult(counts, paused = true)
                 when (val result = upload(item, hashed)) {
                     is BackupUploadResult -> {
                         currentCoroutineContext().ensureActive()
