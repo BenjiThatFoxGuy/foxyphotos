@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
@@ -158,7 +159,8 @@ class MainActivityUiTest {
         compose.waitUntil(5000) {
             compose.waitForIdle()
             shadowOf(android.os.Looper.getMainLooper()).idle()
-            queryCount.get() >= 2
+            queryCount.get() >= 2 &&
+                compose.onAllNodesWithText("DCIM/Test/").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("DCIM/Test/").assertIsDisplayed()
         val first = queryCount.get()
