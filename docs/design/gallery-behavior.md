@@ -6,7 +6,7 @@
 - Modern mode is intended to back up selected folders automatically, with pause support. Build the initial gallery first; automatic scheduling and its conditions are a later increment after the interactions are agreed. Conditions to design: Wi-Fi, cellular data, roaming, Data Saver, power saver and charging. Do not present automatic backup as implemented by the initial gallery.
 - Simple mode remains a manual backup tool. A user starts the run; the existing foreground service continues it in the background. Navigation, permission callbacks, folder refresh and mode changes never initiate backup.
 - Setup asks for Gallery or Simple mode. Settings allows switching the saved choice. Existing installations retain Simple mode unless the user chooses otherwise.
-- A corner settings cog opens Settings from either mode. Settings contains mode selection, backup folders, diagnostics and rerun setup.
+- Simple retains its corner Settings cog. Modern opens Settings from the profile sheet. Settings contains mode selection, backup folders, diagnostics and rerun setup.
 - Backup folders refresh automatically each time their screen is entered. No manual refresh-folders button.
 - The main screen shows an avatar, not the account email. An explicit account tap reveals account details.
 - Google backup lifecycle and pause/cancel controls remain intact. The hidden iCloud scaffold stays hidden.
@@ -19,6 +19,16 @@
 - Distinguish initial loading, permission denial, limited access, genuine empty results, query errors and unreadable individual media.
 - Do not invent cloud items, provider-copy badges or successful backup indicators. Remote browsing and automatic scheduling are not implied by this increment.
 - Advanced selection, pinch density, editing and elaborate viewer gestures can follow the initial usable slice.
+
+## Modern main/profile polish
+
+- Keep the main gallery compact: native Material 3 title/status bar and initials avatar, with no standalone Settings cog or backup-control wall.
+- Open a native scrollable profile sheet for account email, existing backup status/counts/progress, start/pause/resume/cancel, timed pauses, overrides, immediate watching and Settings. Email stays off the gallery.
+- Simple deliberately retains all-at-a-glance backup/policy controls and its existing Settings/account entry points.
+- Display all accessible local images and videos independently of the automatic-backup folder allow-list. `LocalGallery` calls `queryLocalGallery`, which queries image/video metadata without folder predicates or content reads/hashing. Android media grants still bound visibility.
+- Long press enters selection. Only then show selection count, Clear and Back up selected; Back clears selection. Ordinary taps retain the existing viewer and its Back up action.
+- Preserve host-owned grid scroll state, cancellable MediaStore/thumbnail work and selected-media grant handling. No cloud-gallery expansion or unsupported confirmation badges.
+- Release pipeline/metadata and in-app updater are a separate next task, not part of this polish.
 
 ## Reference and licensing boundary
 

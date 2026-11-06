@@ -132,10 +132,29 @@ class MainActivityUiTest {
         val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("onboarding-completed", true).commit()
         val activity = launch()
-        activity.setContent { ProfileControl("private@example.invalid") }
+        activity.setContent { ProfileControl("private@example.invalid", onSettings = {}, backupControls = { androidx.compose.material3.Text("Backup controls") }) }
         compose.onNodeWithText("private@example.invalid").assertDoesNotExist()
         compose.onNodeWithContentDescription("Account").performClick()
         compose.onNodeWithText("private@example.invalid").assertIsDisplayed()
+    }
+
+    @Test fun modernMovesControlsAndSettingsIntoProfileWithoutStartingBackup() {
+        val app = RuntimeEnvironment.getApplication()
+        app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+            .edit().putBoolean("onboarding-completed", true).putString("app-mode", "Modern").commit()
+        launch()
+        compose.onNodeWithText("Photo access is off").assertIsDisplayed()
+        compose.onNodeWithText("Pause for…").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Settings").assertDoesNotExist()
+        compose.onNodeWithText("Select").assertDoesNotExist()
+        compose.onNodeWithText("FP").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Account").performClick()
+        compose.onNodeWithText("Pause for…").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Upload immediately…").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Settings").performScrollTo().performClick()
+        compose.onNodeWithText("App mode").assertIsDisplayed()
+        assertFalse(BackupRuntime.state.value.active)
+        assertNull(shadowOf(app).nextStartedService)
     }
 
     @Test fun folderScreenQueriesAgainOnEveryEntryWithoutStartingBackup() {

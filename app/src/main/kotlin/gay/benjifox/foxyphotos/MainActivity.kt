@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @androidx.compose.runtime.Composable
 private fun FoxyPhotosApp() {
     val context = LocalContext.current
@@ -309,7 +310,36 @@ private fun FoxyPhotosApp() {
     }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (screen == "main" && mode == "Modern") {
+                androidx.compose.material3.TopAppBar(
+                    windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+                    title = {
+                        Column {
+                            Text("FoxyPhotos", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                if (backupState.phase == BackupPhase.IDLE) {
+                                    if (configuredAccount == null) "Not connected" else "Local library"
+                                } else backupState.phase.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                    actions = {
+                        ProfileControl(configuredAccount, onSettings = { screen = "settings" }, backupControls = {
+                            if (backupState.total > 0) {
+                                val processed = backupCounts.uploaded + backupCounts.alreadyPresent + backupCounts.failed + backupCounts.uncertain
+                                Text("$processed of ${backupState.total} processed", style = MaterialTheme.typography.bodySmall)
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { (processed.toFloat() / backupState.total).coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            controls()
+                        })
+                    },
+                )
+            } else Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (screen != "main") TextButton(onClick = { screen = if (screen == "folders" || screen == "connect") "settings" else "main" }) { Text("Back") }
                 Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; else -> "FoxyPhotos" },
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
@@ -319,7 +349,6 @@ private fun FoxyPhotosApp() {
                 }
             }
             if (screen == "main" && mode == "Modern") {
-                Column(Modifier.padding(horizontal = 16.dp)) { controls() }
                 LocalGallery(Modifier.weight(1f), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
             } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (screen) {

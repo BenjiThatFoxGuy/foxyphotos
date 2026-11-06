@@ -2,6 +2,20 @@
 
 Keep this checklist alongside gallery-behavior.md and backup-policy.md. User-approved requirements must survive session changes. Check an item only after implementation and verification; design agreement is not implementation. Gallery work goes first while later backup-policy details are planned in parallel.
 
+## Current: Modern main/profile polish
+
+Source implementation is ready for CI; no local Gradle build, SDK download or new build cache was used. The historical checkboxes below describe earlier slices, not verification of this change.
+
+- [x] Source: Modern-only compact Material 3 title/status bar and initials profile control; backup/policy controls and Settings moved to a scrollable native sheet.
+- [x] Source: Simple at-a-glance controls, Settings cog and account dialog preserved.
+- [x] Source trace: gallery queries all accessible image/video metadata independently of included backup folders; no display hashing. Loader/cancellation paths unchanged.
+- [x] Source: long-press selection, contextual count/Clear/Back up selected; existing viewer backup retained.
+- [x] Focused existing UI regression updated for profile privacy; Modern profile/settings/navigation regression added.
+- [ ] CI compilation, tests and lint for this polish (parent delivery task).
+- [ ] Signed nightly delivery after authorized push (parent delivery task).
+
+Pipeline metadata/updater work remains a separate next task. No expanded cloud gallery, copied reference code/assets/strings, or license changes.
+
 ## First: native gallery, modes and Settings
 
 Implementation commit: `09ff19e`. Parent verification: full check, debug assembly and lint passed; 84 tests, zero failures/errors/skips. Independent review passed after fixing selected-media lifecycle handling and cancellable provider I/O. No physical-device visual smoke test or live-media interoperability claim. Local commits only, not yet pushed.

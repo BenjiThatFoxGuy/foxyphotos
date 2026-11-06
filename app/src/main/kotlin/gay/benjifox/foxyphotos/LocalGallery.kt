@@ -14,7 +14,7 @@ import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -162,10 +162,25 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
             BackupRuntime.command(context, BackupService.START)
         } else selectionError = "Backup busy. Selection kept; finish or cancel the current request first."
     }
+    fun clearSelection() {
+        selecting = false
+        selectedIds = arrayListOf()
+        selectionError = null
+    }
+    BackHandler(enabled = selecting && selected == null) { clearSelection() }
+    // Revoke stale selections when media access or the accessible collection changes.
+    LaunchedEffect(media, status) {
+        if (status == "Loading photos…") return@LaunchedEffect
+        val accessibleIds = media.mapTo(hashSetOf()) { it.uri.toString() }
+        selectedIds = ArrayList(selectedIds.filter { it in accessibleIds })
+    }
     Column(modifier) {
-        Row {
-            TextButton(onClick = { selecting = !selecting }) { Text(if (selecting) "Done selecting" else "Select") }
-            if (selecting) TextButton(enabled = selectedIds.isNotEmpty(), onClick = { backup(selectedIds.toSet()) }) { Text("Back up selected (${selectedIds.size})") }
+        if (selecting) Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { clearSelection() }) { Text("Clear") }
+                Text("${selectedIds.size} selected", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                TextButton(enabled = selectedIds.isNotEmpty(), onClick = { backup(selectedIds.toSet()) }) { Text("Back up selected") }
+            }
         }
         selectionError?.let { Text(it) }
         if (!full && accessible) Text("Showing only photos and videos you allow.", Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
@@ -178,11 +193,19 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
             media.groupBy { Instant.ofEpochMilli(it.timestampMillis).atZone(zone).toLocalDate() }.forEach { (date, entries) ->
                 item(key = "date:$date", span = { GridItemSpan(maxLineSpan) }) { Text(date.format(formatter), Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall) }
                 items(entries, key = { it.uri.toString() }) { entry ->
-                    Box(Modifier.aspectRatio(1f).clickable {
-                        val id = entry.uri.toString()
-                        if (selecting) selectedIds = ArrayList(if (id in selectedIds) selectedIds - id else selectedIds + id)
-                        else selected = id
-                    }) {
+                    Box(Modifier.aspectRatio(1f).combinedClickable(
+                        onClick = {
+                            val id = entry.uri.toString()
+                            if (selecting) selectedIds = ArrayList(if (id in selectedIds) selectedIds - id else selectedIds + id)
+                            else selected = id
+                        },
+                        onLongClickLabel = "Select media",
+                        onLongClick = {
+                            selecting = true
+                            val id = entry.uri.toString()
+                            if (id !in selectedIds) selectedIds = ArrayList(selectedIds + id)
+                        },
+                    )) {
                         MediaImage(entry)
                         if (selecting) Checkbox(entry.uri.toString() in selectedIds, onCheckedChange = null)
                     }
