@@ -1,21 +1,29 @@
-# iCloud Photos: deferred research
+# Manual-session iCloud Photos read-only experiment
 
-User decision: defer iCloud authentication and integration. Keep only a hidden auth scaffold that explicitly returns unavailable. Do not expose it in UI, onboarding, provider selection, or backup. Do not accept or persist Apple credentials until the protocol is researched and separately authorized.
+Milestone 2 is authorized by the experimental roadmap; the previous deferred-only scaffold description is superseded. Interactive `ICloudAuth.signIn()` remains explicitly unavailable. The supported prototype path is manual import of an externally renewed session, validated before encrypted replacement. No Apple password login, challenge submission, cloud write, upload or deletion is implemented.
 
-## Pinned reference
+## Pinned source inspection (2026-11-06)
 
-- Repository: https://github.com/icloud-photos-downloader/icloud_photos_downloader
-- Commit: `3caeae584c3d8bc6fcc51a1c9f7e5413b1422fd3`
-- Local reference: `/home/benji/.hermes/cache/scratch/icloudpd-reference`
-- Relevant paths: `src/pyicloud_ipd/base.py`, `session.py`, `services/photos.py`.
-- License: `LICENSE.md`, MIT, copyright (c) 2016 Nathan Broadbent. No upstream implementation is included in this scaffold. Preserve required notices if copying substantial upstream code later.
+- bclone `f6ad6b63ec67694011c686f246f8832cb0e6fb9a`, local `/home/benji/projects/bclone`, [Photos consumer](https://github.com/BenjiThatFoxGuy/bclone/blob/f6ad6b63ec67694011c686f246f8832cb0e6fb9a/backend/iclouddrive/icloudphotos.go), `api/{client,session,photos}.go`, `fs/config/obscure/obscure.go`, `COPYING` (MIT, Nick Craig-Wood).
+- icloudpd `3caeae584c3d8bc6fcc51a1c9f7e5413b1422fd3`, local `/home/benji/.hermes/cache/scratch/icloudpd-reference`, [Photos implementation](https://github.com/icloud-photos-downloader/icloud_photos_downloader/blob/3caeae584c3d8bc6fcc51a1c9f7e5413b1422fd3/src/pyicloud_ipd/services/photos.py), `base.py`, `session.py`, `LICENSE.md` (MIT, Nathan Broadbent).
+- Protocol and obscure compatibility were implemented independently in Kotlin; notices retain upstream copyright/license context. No bclone implementation was changed.
 
-## Future work, not implemented
+## Import compatibility
 
-- SRP sign-in init/complete, trusted-device verification and trust, session validation and expiry.
-- Encrypted session restoration through the shared CredentialStore, strict cookie scope, validated Apple HTTPS endpoints, sanitized failures, and secret-safe state.
-- Photos service discovery, full library zone identity, album continuation, and asset/master joins with asset-based pagination.
-- Establish support and honest unavailable states for SMS, Advanced Data Protection, and security keys before exposing them.
-- Offline protocol and privacy fixtures before any live account testing.
+Explicitly name one INI remote section; only that section is interpreted. Supported config keys are `type = iclouddrive`, `service = photos`, `apple_id`, `password`, `trust_token`, `cookies`, `client_id`, and the ignored non-authentication path option `encoding`. Unknown/duplicate selected fields, wrong backend/service, missing trust token or cookies, browser-cookie JSON, oversize files and whole-file `RCLONE_ENCRYPT` formats are rejected. Password is optional for valid-cookie validation. If present it is explicitly rclone obscure (raw URL-safe base64, 16-byte IV, AES-CTR, rclone's public key); it is never guessed as plaintext. Obscure is reversible encoding, not credential protection. The imported original text is not stored.
 
-The pinned upstream Photos service has no upload protocol. Browsing or a successful sign-in is not backup parity. Do not report successful iCloud backups or write iCloud upload-ledger entries. Upload requires separate research; deletion is out of scope. Google backup, wizard, and foreground controls stay unchanged. This platform-free Kotlin/JVM scaffold is not an iOS implementation. Leave bclone untouched.
+The bclone Photos constructor requires a trust token and decodes password, but its session consumer POSTs cookies to `https://setup.icloud.com/setup/ws/1/validate` before password login. Valid cookies return account/service information directly. This prototype supports that valid-session branch only and retains compatible password, trust token and client ID privately. It never falls back to password login. Additional `session_token`, `session_id`, or `scnt` config fields are not invented. Cookie input is a Cookie header, e.g. `name=value;other=value;`, including values containing `=`. Cookie updates from validated Apple responses are merged and saved encrypted. Replacement only overwrites the previous session after successful validation; failure preserves it and backup queues. The user controls the source export and should remove it after import.
+
+## Real Photos reads
+
+Validation discovers active `ckdatabasews`; exact HTTPS Apple-domain boundaries, port and user-info are checked before cookies are sent. Redirects are disabled. `changes/database` discovers nondeleted library zones. All Photos uses `CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted`; user albums use `CPLAlbumByPositionLive`, base64 `albumNameEnc`, and `CPLContainerRelationLiveByAssetDate` with confirmed `parentId`. Album IDs include zone and record ID, so equal display names remain distinct. Each zone also has an All Photos choice. The initial grid uses PrimarySync (or first returned zone); choose albums to browse other discovered libraries.
+
+Asset-to-master joins use `masterRef`; **startRank advances by CPLAsset count, not master count**. The pinned icloudpd implementation documents duplicate assets sharing one master. Assets remain separate stable identities, and returned masters are retained within the bounded screen session across pages. Missing masters fail the page visibly rather than silently manufacturing items. Requests ask for actual JPEG thumbnail/medium/large/full resources and original/video resources. Previews never masquerade as original-byte verification. Signed resource reads send no imported cookie, permit only HTTPS Apple/iCloud content hosts, and reject redirects. The native viewer can save an explicitly chosen original through Android's document picker, up to 32 MiB. Unsupported/absent JPEG renditions show retry/unavailable; videos have still previews only.
+
+HTTP 401/403/421 or authentication-required responses latch reauthentication required. No repeated unauthorized retries, forced time-based expiry or queue deletion. Renew externally, import replacement, then reopen the library. Network errors remain retryable. Expired signed resource URLs ask for refresh rather than falsely declaring account expiry. ADP, security keys, SMS and new 2FA challenges cannot be resolved inside this prototype; account access may be unavailable and must be renewed externally. WebView capture remains the decided future follow-up, not a prerequisite.
+
+## Bounds and evidence
+
+256 KiB config, 8 MiB JSON pages, 200-result media requests, ten page requests per selected listing in UI, 50 media calls and 5,000 cached assets/masters per screen session, 50 zones, 1,000 albums and ten UI album pages. Zone discovery with moreComing fails visibly rather than claiming completeness. Album continuation and zones are advanced only on explicit request. Each provider has three preview jobs and a 12 MiB bitmap LRU; preview bytes are capped at 2/8 MiB, original reads at 32 MiB. Media responses are streamed with byte bounds and cancellable calls. No background crawling or provider data is persisted outside encrypted sessions.
+
+Focused offline tests cover selected-section isolation, format rejection, obscure compatibility, atomic replacement policy, validate-first transport/cookie rotation, shared-master assets and offsets, separate zone/album identities, expiry versus network retry and endpoint rejection. Native UI coverage checks independent default-off gating and missing-auth state. CI build is not live device/account proof; manual session validation/listing/preview and album membership remain unverified against a real account.

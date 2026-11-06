@@ -86,6 +86,7 @@ private fun FoxyPhotosApp() {
     val credentialStore = remember { AndroidKeystoreCredentialStore(context.applicationContext) }
     val googleAuthClient = remember { GoogleAuthClient() }
     val diagnostics = remember { AppDiagnostics.get(context) }
+    var icloudEnabled by remember { mutableStateOf(preferences.getBoolean("experimental-icloud-library", false)) }
     var combinedEnabled by remember { mutableStateOf(preferences.getBoolean("experimental-google-library", false)) }
     var showLogs by remember { mutableStateOf(false) }
     var screen by rememberSaveable { mutableStateOf("main") }
@@ -335,6 +336,7 @@ private fun FoxyPhotosApp() {
                     },
                     actions = {
                         if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Combined") }
+                        if (icloudEnabled) TextButton(onClick = { screen = "icloud-library" }) { Text("iCloud") }
                         ProfileControl(configuredAccount, onSettings = { screen = "settings" }, backupControls = {
                             if (updateState.release != null) TextButton(onClick = { screen = "settings" }) { Text("Update available") }
                             if (backupState.total > 0) {
@@ -355,11 +357,14 @@ private fun FoxyPhotosApp() {
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 if (screen == "main") {
                     if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Combined") }
+                        if (icloudEnabled) TextButton(onClick = { screen = "icloud-library" }) { Text("iCloud") }
                     ProfileControl(configuredAccount)
                     IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
                 }
             }
-            if (screen == "combined" && combinedEnabled) {
+            if (screen == "icloud-library" && icloudEnabled) {
+                Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }, includeICloud = true) }
+            } else if (screen == "combined" && combinedEnabled) {
                 Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }) }
             } else if (screen == "main" && mode == "Modern") {
                 Box(Modifier.weight(1f)) {
@@ -371,6 +376,19 @@ private fun FoxyPhotosApp() {
                 when (screen) {
                     "settings" -> {
                         item { UpdateControls(updater) }
+                        item {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Experimental local + Google + iCloud library", Modifier.weight(1f))
+                                Switch(icloudEnabled, modifier = Modifier.semantics { contentDescription = "Enable experimental iCloud library" }, onCheckedChange = {
+                                    icloudEnabled = it
+                                    preferences.edit().putBoolean("experimental-icloud-library", it).apply()
+                                })
+                            }
+                            if (icloudEnabled) {
+                                TextButton(onClick = { screen = "icloud-library" }) { Text("Open iCloud combined library") }
+                                ICloudSessionSetup()
+                            }
+                        }
                         item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {

@@ -77,6 +77,7 @@ dependencies {
     implementation(project(":core:security"))
     implementation(project(":provider:contract"))
     implementation(project(":provider:google-native"))
+    implementation(project(":provider:icloud"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

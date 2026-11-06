@@ -58,7 +58,12 @@ Research actual existing bclone Google Photos read/list/download capability befo
 
 Provide real listings/previews, source badges and honest loading/partial/error states; local media remains all accessible items regardless routine backup-folder selection. Use stable provider identities. Merge proven equivalents only; a filename match is not proof of equality. No fake remote entries or invented backup badges. Bound paging, caching and thumbnail work. Preserve ordinary local-only mode as default and existing backup behavior.
 
+Milestone 1 handoff update (parent report, 2026-11-06): source `9b02ee1bd86105f2b5078afc551f9d081b911998`, CI #80 [run 42233707821](https://github.com/BenjiThatFoxGuy/foxyphotos/actions/runs/42233707821) green. Parent reports exact signed artifact verified and is delivering it now. Delivery is parent-owned; live Google/device acceptance remains unverified and is not a blocker for milestone 2 implementation. Parent handoff `2d834ce` is preserved.
+
 ## 2. Add iCloud read-only source
+
+Implementation in progress: separate default-off native local + Google + iCloud grid; explicit manual rclone remote-section import/replacement into existing encrypted credential storage; validation-only authentication; real bounded Photos zones/albums/asset-master listing, signed JPEG previews and explicit bounded original read via Android document picker. Existing Simple/local and Google opt-in defaults and backup queues are preserved. No cloud writes/deletion or interactive Apple sign-in. See [pinned source research and precise limitations](../research/icloud-photos.md). CI and artifact evidence will be recorded after the exact implementation source builds. Live account/device acceptance has not been performed.
+
 
 This explicitly reopens earlier deferred iCloud work ONLY for authenticating, listing and reading/downloading photos needed by the opt-in experiment and future transfers. No iCloud Photos upload implementation, no Apple Drive substitution, no iOS target. Keep normal/local mode free of iCloud prompts. Research bclone and icloudpd/pyicloud references, licenses and credential/challenge flows before implementing. Handle 2FA and expired sessions honestly; never claim unsupported auth or listing works. No new credential solicitation while Benji is busy: implement supported flows and identify exact missing user input when unavoidable.
 

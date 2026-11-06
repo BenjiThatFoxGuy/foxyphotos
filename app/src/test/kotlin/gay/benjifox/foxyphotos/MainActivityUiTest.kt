@@ -73,6 +73,27 @@ class MainActivityUiTest {
         compose.onNodeWithText("Allow photos access").assertDoesNotExist()
     }
 
+    @Test fun icloudLibraryHasIndependentDefaultOffGateAndHonestMissingSession() {
+        val app = RuntimeEnvironment.getApplication()
+        val prefs = app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("onboarding-completed", true).commit()
+        launch()
+        compose.onNodeWithText("iCloud").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Experimental local + Google + iCloud library"))
+        compose.onNodeWithText("Open iCloud combined library").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Enable experimental iCloud library").performClick()
+        org.junit.Assert.assertTrue(prefs.getBoolean("experimental-icloud-library", false))
+        assertFalse(prefs.getBoolean("experimental-google-library", false))
+        clickSettingsEntry("Open iCloud combined library")
+        compose.onNodeWithText("Experimental · Local + Google + iCloud").assertIsDisplayed()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("iCloud not configured. Import a session file in Settings. Local and Google remain available.").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertFalse(BackupRuntime.state.value.active)
+        assertNull(shadowOf(app).nextStartedService)
+    }
+
     @Test fun combinedLibraryRequiresOptInAndShowsMissingAuthWithoutRemoteRows() {
         val app = RuntimeEnvironment.getApplication()
         val prefs = app.getSharedPreferences("foxyphotos.backup-settings", Context.MODE_PRIVATE)

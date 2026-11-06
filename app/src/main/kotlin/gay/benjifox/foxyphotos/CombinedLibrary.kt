@@ -26,13 +26,13 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-private data class CombinedItem(val local: GalleryMedia? = null, val remote: LibraryItem? = null) {
-    val key get() = local?.let { "local:${it.uri}" } ?: "google:${remote!!.id}"
+private data class CombinedItem(val local: GalleryMedia? = null, val remote: LibraryItem? = null, val source: String = "Google") {
+    val key get() = local?.let { "local:${it.uri}" } ?: "$source:${remote!!.id}"
     val time get() = local?.timestampMillis ?: remote!!.timestampMillis
 }
 
 /** Session-only bounded state; leaving this screen drops remote IDs, cursors and bitmap cache. */
-private class GooglePreviewSession(val provider: ReadOnlyLibrary) {
+internal class GooglePreviewSession(val provider: ReadOnlyLibrary) {
     val slots = Semaphore(3)
     val cache = object : LruCache<String, Bitmap>(12 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
@@ -57,7 +57,7 @@ private class GooglePreviewSession(val provider: ReadOnlyLibrary) {
 }
 
 @Composable
-private fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, large: Boolean = false) {
+private fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, large: Boolean = false, source: String = "Google") {
     var attempt by remember(item.id) { mutableIntStateOf(0) }
     var loading by remember(item.id, large, attempt) { mutableStateOf(true) }
     val bitmap by produceState<Bitmap?>(null, item.id, large, attempt) {
@@ -67,7 +67,7 @@ private fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, larg
         finally { loading = false }
     }
     Box(Modifier.fillMaxSize().background(Color(0xFF24242A)), contentAlignment = Alignment.Center) {
-        bitmap?.let { Image(it.asImageBitmap(), if (item.video) "Google video preview" else "Google photo",
+        bitmap?.let { Image(it.asImageBitmap(), if (item.video) "$source video preview" else "$source photo",
             Modifier.fillMaxSize(), contentScale = if (large) ContentScale.Fit else ContentScale.Crop) }
             ?: if (loading) CircularProgressIndicator(Modifier.size(24.dp)) else TextButton(onClick = { attempt++ }) { Text("Retry preview") }
         if (item.video) Text("Video · preview only", color = Color.White, modifier = Modifier.align(Alignment.BottomCenter))
@@ -75,7 +75,7 @@ private fun GooglePreview(session: GooglePreviewSession, item: LibraryItem, larg
 }
 
 @Composable
-internal fun CombinedLibrary(onPermission: () -> Unit) {
+internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val diagnostics = remember { AppDiagnostics.get(context) }
@@ -89,6 +89,7 @@ internal fun CombinedLibrary(onPermission: () -> Unit) {
             }
         }))
     }
+    val cloud = remember { ICloudSourceState() }
     var locals by remember { mutableStateOf(emptyList<GalleryMedia>()) }
     var localStatus by remember { mutableStateOf("Loading local media…") }
     var remotes by remember { mutableStateOf(emptyList<LibraryItem>()) }
@@ -146,12 +147,12 @@ internal fun CombinedLibrary(onPermission: () -> Unit) {
         catch (_: Exception) { localStatus = "Local media unavailable. Check photo access and refresh." }
     }
     LaunchedEffect(Unit) { load() }
-    val entries = remember(locals, remotes) {
-        (locals.map { CombinedItem(local = it) } + remotes.map { CombinedItem(remote = it) })
+    val entries = remember(locals, remotes, cloud.items) {
+        (locals.map { CombinedItem(local = it) } + remotes.map { CombinedItem(remote = it) } + cloud.items.map { CombinedItem(remote = it, source = "iCloud") })
             .sortedWith(compareByDescending<CombinedItem> { it.time }.thenBy { it.key })
     }
     Column(Modifier.fillMaxSize()) {
-        Text("Experimental · Local + Google Photos", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.titleMedium)
+        Text(if (includeICloud) "Experimental · Local + Google + iCloud" else "Experimental · Local + Google Photos", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.titleMedium)
         Text(localStatus, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
         Text("${locals.size} local · ${remotes.size} Google loaded. Sources stay separate; Google listing may be partial.",
             Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
@@ -167,11 +168,12 @@ internal fun CombinedLibrary(onPermission: () -> Unit) {
         else if (pages >= 10) Text("Session page limit reached. Refresh to start again.", Modifier.padding(12.dp))
         else if (!stopped) TextButton(onClick = { load() }) { Text(if (error != null) "Retry Google page" else "Load next Google page") }
         else if (error == null) Text("Google listing ended for this session.", Modifier.padding(horizontal = 12.dp))
+        if (includeICloud) ICloudLibraryControls(cloud)
         LazyVerticalGrid(GridCells.Adaptive(100.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(entries, key = { it.key }) { item ->
                 Box(Modifier.aspectRatio(1f).clickable { selected = item }) {
-                    item.local?.let { MediaImage(it) } ?: GooglePreview(session, item.remote!!)
-                    Text(if (item.local != null) "Local" else "Google", color = Color.White,
+                    item.local?.let { MediaImage(it) } ?: GooglePreview(if (item.source == "iCloud") cloud.preview!! else session, item.remote!!, source = item.source)
+                    Text(if (item.local != null) "Local" else item.source, color = Color.White,
                         modifier = Modifier.align(Alignment.TopStart).background(Color.Black.copy(alpha = .7f)).padding(4.dp))
                 }
             }
@@ -182,8 +184,9 @@ internal fun CombinedLibrary(onPermission: () -> Unit) {
             Column(Modifier.fillMaxSize().background(Color.Black)) {
                 TextButton(onClick = { selected = null }) { Text("Close") }
                 Box(Modifier.weight(1f)) {
-                    item.local?.let { MediaImage(it, large = true) } ?: GooglePreview(session, item.remote!!, large = true)
+                    item.local?.let { MediaImage(it, large = true) } ?: GooglePreview(if (item.source == "iCloud") cloud.preview!! else session, item.remote!!, large = true, source = item.source)
                 }
+                if (item.source == "iCloud" && item.remote != null) cloud.preview?.let { ICloudOriginalRead(it.provider, item.remote.id) }
                 if (item.local?.video == true) Text("Local video thumbnail. Open Local library for playback.", color = Color.White)
             }
         }
