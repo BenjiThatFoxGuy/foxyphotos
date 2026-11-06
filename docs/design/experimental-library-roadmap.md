@@ -1,5 +1,11 @@
 # Experimental library and storage roadmap
 
+## PINNED: future browser-assisted iCloud session refresh
+
+**Do not lose this follow-up.** Benji's external login-refresh project launches a browser, lets him sign into Apple himself, then captures the resulting cookies after successful login. Future FoxyPhotos convenience flow: user-initiated browser/WebView sign-in followed by secure capture/import of the resulting session, avoiding manual cookie copying. Research the external project's implementation and Apple's actual supported browser behavior before choosing WebView versus another browser-mediated design; do not assume external-browser cookies are accessible to the app, embedded login is accepted, or cookies alone contain every required session field.
+
+This is **future scope**, not a prerequisite for the manual rclone-style session import or this goal's completion. If a bounded investigation yields a proven safe implementation, it may be proposed as a separate follow-up slice; do not derail the active roadmap or claim this flow exists from a login screen alone. Preserve manual import as fallback. User enters Apple credentials/2FA directly into the genuine Apple page; never intercept passwords, bypass browser isolation or log session cookies. Store captured session material only through encrypted provider credentials. Account for cancelled login, expired sessions, cookie updates and replacement. The external project's name/path is not yet identified in this plan; retrieve it when implementing rather than guess.
+
 ## Execution contract
 
 Use Codex CLI for implementation and CI iteration. Hermes supervises milestones, verifies exact artifacts, and delivers signed release nightlies on Telegram. Do not run local Gradle, download an Android SDK, or recreate dependency caches on this disk-constrained host. No repeated review fan-out. Keep commits small and preserve source portability: platform-neutral policy/provider contracts in core, Android UI/storage/install adapters on Android. No iOS implementation now.
