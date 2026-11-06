@@ -68,6 +68,11 @@ Milestone 1 handoff update (parent report, 2026-11-06): source `9b02ee1bd86105f2
 
 ## 2. Add iCloud read-only source
 
+Parent handoff (2026-11-06): final source `9283b7e6977e974654ce01078b9b75b918dfa559`,
+CI #83 [run 42241611497](https://github.com/BenjiThatFoxGuy/foxyphotos/actions/runs/42241611497)
+passed; parent verified the exact signed APK and is delivering it. Live account/device
+acceptance remains unverified and does not block milestone 3 implementation.
+
 Implemented read-only prototype (first green source `e9ca63771b934650d24dcce6c137ff517f103cc1`): separate default-off native local + Google + iCloud grid; explicit manual rclone remote-section import/replacement into existing encrypted credential storage; validation-only authentication; real bounded Photos zones/albums/asset-master listing, signed JPEG previews and explicit bounded original read via Android document picker. Existing Simple/local and Google opt-in defaults and backup queues are preserved. No cloud writes/deletion or interactive Apple sign-in. See [pinned source research and precise limitations](../research/icloud-photos.md). CI #82 [run 42241005165](https://github.com/BenjiThatFoxGuy/foxyphotos/actions/runs/42241005165) is green, including focused import/protocol fixtures, independent opt-in/missing-auth native UI coverage on API 33/35, existing regressions, and debug/release package/version/cryptographic signature checks. A small follow-up matches the pinned consumer's browser User-Agent and validation content type and labels the native screen. Final signed APK, exact source/run/workflow attestation, digest and matching parent signing-certificate evidence are tracked in `/home/benji/.hermes/cache/scratch/foxyphotos-icloud-library/verification.json` with the parent handoff. Parent owns delivery. Live Apple/Google account/device acceptance has not been performed; this milestone stays unchecked for that acceptance, not because of an implementation prerequisite.
 
 User steps: Settings → enable Experimental local + Google + iCloud library → enter exact remote section name → Import / replace session file → choose a locally exported config with externally valid Cookie-header session → wait for validation success → Open iCloud combined library. Google uses its existing connection independently; absence/failure of either provider keeps the other sources accessible. Scroll the source controls if needed, load pages explicitly, choose iCloud libraries/albums, tap a photo for its preview, or save an original through Android's document picker (up to 32 MiB). On session rejection, renew externally, import replacement and reopen the view. Failed import leaves the old session and backup queues intact. WebView capture remains the decided future follow-up. Video playback, live compatibility acceptance, cloud writes/deletion, cleanup and transfers remain out of this prototype.
@@ -101,18 +106,29 @@ Both actions first copy: explicit source selection, bounded queue/staging, progr
 
 ## 3. Verified local cleanup
 
-Implementation in progress (2026-11-06): default-off native cleanup screen in Settings,
-independent device-local whitelist, durable new-upload receipts and explicit later-run
+Implemented (2026-11-06): default-off native cleanup screen in Settings,
+independent actual-volume + folder whitelist, durable new-upload receipts and explicit later-run
 actual Google `=d` byte-stream verification. A usable per-item Android 11+ write-consent
 then trash path re-downloads and rechecks policy/content/identity after system consent.
 No permanent delete or cloud delete. Original unredacted permission is required;
 old receipts/presence checks cannot qualify. 20 candidates/preview, 256 MiB/item,
 30-day upload evidence, 10-minute session verification; Android 10 cleanup disabled.
+First green source `2c3dfbf95351700034f6dd4d10229bf4b494a10e`, CI #89
+[run 42244217021](https://github.com/BenjiThatFoxGuy/foxyphotos/actions/runs/42244217021).
+Includes focused portable policy/execution/download fixtures, durable receipt isolation
+and default-off native UI tests on API 33/35, plus existing regressions and signed
+package/version/signature CI checks. Final signed artifact and exact final
+source/run/workflow attestation, local APK signature and manifest verification,
+digest and previous certificate comparison are retained for parent delivery in
+`/home/benji/.hermes/cache/scratch/foxyphotos-verified-cleanup/verification.json`
+and `apk-signature-verification.json` (artifact handoff, not device acceptance).
 See [protocol evidence, exact safety model and limitations](../research/google-original-cleanup.md).
 Google photo location removal and video thumbnail/transcode semantics can prevent
 byte equality; those items stay local. Live original download/device acceptance
-remains unverified. CI/artifact evidence follows below; do not mark this milestone
-accepted from compilation or fixture success alone.
+remains unverified. Do not mark this milestone accepted from compilation or fixture success alone.
+No live personal media/cloud deletion was performed; tests use fixtures.
+Simple, combined experiments and backup remain independent. Parent owns delivery
+and live account/device acceptance; the milestone stays unchecked for acceptance.
 
 User steps: Settings → Experimental verified local cleanup → enable → allow original
 media access → choose cleanup folders → back up **new** items normally → return and
