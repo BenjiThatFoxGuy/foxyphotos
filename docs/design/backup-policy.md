@@ -19,7 +19,17 @@ Status: brainstorming only. Do not implement scheduling or overrides as part of 
 - Temporary condition overrides with an explicit expiry time, or a session scope that lapses when the pending batch concludes.
 - Design the interaction, duration presets, overlap, failure handling and session boundaries before implementation. Do not make temporary exceptions permanent settings.
 
-## Proposed interaction for discussion
+## Further agreed interaction
+
+- Use the UI label This batch rather than For this session. The batch is bounded to pending eligible media when confirmed; new arrivals do not extend it.
+- Keep immediate-upload duration choices rather than a single fixed long window.
+- Condition-wait flow: Back up anyway -> choose duration or This batch -> choose exception scope.
+- Scope choice Current blockers captures only the policy restrictions blocking at confirmation. New, unapproved blockers can stop the run later.
+- Scope choice All backup conditions temporarily bypasses all enumerated, user-configurable backup conditions for the chosen period or batch, including those which become blocking later. Confirmation must list the covered conditions and make cellular/roaming implications explicit. Freeze the supported condition set at confirmation rather than silently including future settings.
+- Neither scope can include media outside the selected folders or bypass explicit user pause, permissions, authentication, provider failures, or OS restrictions. These are backup-policy exceptions, not unrestricted execution.
+- Duration and exception scope are distinct. Time expiry or batch conclusion removes the exception automatically.
+
+## Initial proposal and remaining detail
 
 - Keep urgency and permission separate. Immediate watching does not implicitly authorize cellular, roaming or other restricted conditions.
 - Offer an Upload immediately action with a bounded duration and a Stop action. Proposed presets: 15 minutes, 1 hour, 4 hours. New media remains subject to selected-folder filters.
