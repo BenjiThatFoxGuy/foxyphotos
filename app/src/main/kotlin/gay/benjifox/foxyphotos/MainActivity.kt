@@ -375,7 +375,7 @@ private fun FoxyPhotosApp() {
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Experimental local + Google library", Modifier.weight(1f))
-                                Switch(combinedEnabled, onCheckedChange = {
+                                Switch(combinedEnabled, modifier = Modifier.semantics { contentDescription = "Enable experimental combined library" }, onCheckedChange = {
                                     combinedEnabled = it
                                     preferences.edit().putBoolean("experimental-google-library", it).apply()
                                 })

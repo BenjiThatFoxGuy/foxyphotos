@@ -6,9 +6,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasAnySibling
-import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -85,7 +82,7 @@ class MainActivityUiTest {
         compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Experimental local + Google library"))
         compose.onNodeWithText("Open combined library").assertDoesNotExist()
-        compose.onNode(isToggleable() and hasAnySibling(hasText("Experimental local + Google library"))).performClick()
+        compose.onNodeWithContentDescription("Enable experimental combined library").performClick()
         org.junit.Assert.assertTrue(prefs.getBoolean("experimental-google-library", false))
         clickSettingsEntry("Open combined library")
         compose.onNodeWithText("Experimental · Local + Google Photos").assertIsDisplayed()
