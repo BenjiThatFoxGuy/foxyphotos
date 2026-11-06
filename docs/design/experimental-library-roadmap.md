@@ -129,6 +129,16 @@ Implement policy, durable evidence and a safe preview first. Do not execute real
 
 ## 4. Folder-derived Google albums and browsing
 
+2026-11-06 safe groundwork alongside cleanup: portable `matchFolderAlbum` resolves
+only an exact unique existing title to an opaque provider identity, preserves the
+full device-folder identity, and blocks ambiguous/incomplete enumeration. Focused
+fixtures cover duplicate titles, partial listings and distinct device folders.
+This is policy groundwork only: no new album browser, automatic creation, mapping
+setting or album writes are claimed. Native album enumeration/capacity/membership
+fixtures and usable browsing remain milestone 4 work. Google transformed downloads
+remain excluded from cleanup rather than being called verified.
+
+
 Quality of life is the product priority: a lean native client that can map phone folder A to backend album A, not merely another uploader. Prototype browsing real provider albums and local folders alongside the optional mapping. Keep future iOS reuse in the core; no iOS implementation in this goal.
 
 ### Sticky research requirement: Google Photos album capacity
