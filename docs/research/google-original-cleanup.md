@@ -32,7 +32,9 @@ cannot authorize deleting an unredacted original using redacted bytes.
 
 ## Implemented limits
 
-Default off; independent private folder whitelist starts empty. Only new committed
+Default off; independent private folder whitelist starts empty. Folder authorization
+uses the actual MediaStore volume name plus relative path (primary and removable
+volumes are separate); receipt URIs are canonicalized to that actual volume. Only new committed
 uploads while enabled/whitelisted on Android 11+ can create durable private evidence;
 presence checks and the old dedup ledger never become cleanup receipts. Evidence
 is written only if local identity and full unredacted hash still match the upload
@@ -51,8 +53,8 @@ streaming buffers, no media staging. Network has a 30-second call deadline,
 no redirects and cancellable response consumption. Verification is session-only,
 expires after 10 minutes and disappears on leaving/recreation. Receipt persistence
 is durable across restarts, not remote-verification persistence. Local folder scan
-uses the existing cancellable MediaStore scanner (enumerates accessible folder
-metadata; no network crawl). No automatic deletion/background cleanup.
+queries accessible nonpending/nontrashed MediaStore volume/folder metadata with
+cancellation checks; no network crawl. No automatic deletion/background cleanup.
 
 Each item has a labelled preview result and explicit trash confirmation, then the
 native write permission dialog. After permission, download bytes again, compare

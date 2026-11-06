@@ -51,7 +51,7 @@ internal class AndroidBackupWork(private val context: Context) {
                 diagnostics = diagnostics,
                 hash = { item -> currentItem = item.uri.toString(); currentFolder = item.relativePath; report(BackupPhase.HASHING)
                     cleanupBefore = withContext(Dispatchers.IO) {
-                        try { if (android.os.Build.VERSION.SDK_INT >= 30 && cleanup.enabled() && item.relativePath in cleanup.folders()) cleanup.snapshot(item.uri) else null }
+                        try { if (android.os.Build.VERSION.SDK_INT >= 30 && cleanup.enabled()) cleanup.snapshot(item.uri).takeIf { it.folder in cleanup.folders() } else null }
                         catch (_: Exception) { null }
                     }
                     scanner.hash(item) },
@@ -83,7 +83,7 @@ internal class AndroidBackupWork(private val context: Context) {
                                     val digest = cleanup.hash(after)
                                     if (before == after && cleanup.snapshot(item.uri) == after &&
                                         digest == hashed.sha256.joinToString("") { "%02x".format(it) }) {
-                                        cleanup.record(item.uri, gay.benjifox.foxyphotos.core.backup.CleanupUploadEvidence(
+                                        cleanup.record(after.uri, gay.benjifox.foxyphotos.core.backup.CleanupUploadEvidence(
                                             after.identity, after.folder, digest, after.size, outcome.mediaKey,
                                             cleanupRun, System.currentTimeMillis()))
                                     }

@@ -19,7 +19,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import gay.benjifox.foxyphotos.core.backup.*
-import gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner
 import gay.benjifox.foxyphotos.core.model.*
 import gay.benjifox.foxyphotos.core.security.AndroidKeystoreCredentialStore
 import gay.benjifox.foxyphotos.provider.contract.CredentialReference
@@ -90,7 +89,7 @@ internal fun VerifiedCleanupScreen() {
         }
     }
     LaunchedEffect(Unit) {
-        try { available = MediaStoreFolderScanner(context.contentResolver).scan().map { it.relativePath } }
+        try { if (Build.VERSION.SDK_INT >= 30) available = storage.localItems().map { it.second }.distinct().sorted() }
         catch (_: Exception) { status = "Photo access unavailable. Grant photo access from the library first." }
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -124,9 +123,9 @@ internal fun VerifiedCleanupScreen() {
                     val run = java.util.UUID.randomUUID().toString()
                     event(DiagnosticStep.CLEANUP_PREVIEW)
                     try {
-                        val media = MediaStoreFolderScanner(context.contentResolver).scanSelectedFolders(storage.folders())
+                        val media = storage.localItems().filter { it.second in storage.folders() }
                         val allCandidates = withContext(Dispatchers.IO) {
-                            val all = media.mapNotNull { m -> storage.evidence(m.uri)?.takeIf { storage.ended(it.uploadRun) && VerifiedCleanup.candidate(it, run, System.currentTimeMillis()) }?.let { m.uri to it } }
+                            val all = media.mapNotNull { m -> storage.evidence(m.first)?.takeIf { storage.ended(it.uploadRun) && VerifiedCleanup.candidate(it, run, System.currentTimeMillis()) }?.let { m.first to it } }
                             all
                         }
                         candidateCount = allCandidates.size
