@@ -390,11 +390,16 @@ private fun FoxyPhotosApp() {
                             gallerySavedState.SaveableStateProvider("gallery") {
                                 LocalGallery(Modifier.fillMaxSize(), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
                             }
-                        } else CombinedLibrary(
-                            onPermission = { permissionLauncher.launch(requiredPermissions) },
-                            includeLocal = libraryMode.includeLocal, includeGoogle = libraryMode.includeGoogle,
-                            includeICloud = libraryMode.includeICloud,
-                        )
+                        } else if (libraryMode == gay.benjifox.foxyphotos.core.model.LibraryMode.ICLOUD_ONLY) {
+                            // iCloud-only: show iCloud browsing, no Google references
+                            ICloudSessionSetup()
+                        } else {
+                            CombinedLibrary(
+                                onPermission = { permissionLauncher.launch(requiredPermissions) },
+                                includeLocal = libraryMode.includeLocal, includeGoogle = libraryMode.includeGoogle,
+                                includeICloud = libraryMode.includeICloud,
+                            )
+                        }
                     }
                 }
             } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
