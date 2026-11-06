@@ -86,6 +86,7 @@ private fun FoxyPhotosApp() {
     val diagnostics = remember { AppDiagnostics.get(context) }
     var showLogs by remember { mutableStateOf(false) }
     var screen by rememberSaveable { mutableStateOf("main") }
+    val gallerySavedState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val galleryGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var mode by remember { mutableStateOf(preferences.getString("app-mode", "Simple") ?: "Simple") }
     fun selectMode(value: String) {
@@ -354,7 +355,11 @@ private fun FoxyPhotosApp() {
                 }
             }
             if (screen == "main" && mode == "Modern") {
-                LocalGallery(Modifier.weight(1f), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
+                Box(Modifier.weight(1f)) {
+                    gallerySavedState.SaveableStateProvider("gallery") {
+                        LocalGallery(Modifier.fillMaxSize(), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
+                    }
+                }
             } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (screen) {
                     "settings" -> {

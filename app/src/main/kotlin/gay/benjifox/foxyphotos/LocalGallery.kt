@@ -13,6 +13,15 @@ import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -98,8 +107,9 @@ internal suspend fun queryLocalGallery(resolver: ContentResolver, images: Boolea
 private val decodeSlots = Semaphore(3)
 
 @Composable
-private fun MediaImage(media: GalleryMedia, large: Boolean = false) {
+private fun MediaImage(media: GalleryMedia, large: Boolean = false, modifier: Modifier = Modifier) {
     val resolver = LocalContext.current.contentResolver
+    var loading by remember(media.uri, large) { mutableStateOf(true) }
     val bitmap by produceState<Bitmap?>(null, media.uri, large) {
         value = withContext(Dispatchers.IO) {
             decodeSlots.withPermit {
@@ -111,12 +121,49 @@ private fun MediaImage(media: GalleryMedia, large: Boolean = false) {
                 } catch (_: java.io.IOException) { null } catch (_: SecurityException) { null } catch (_: IllegalArgumentException) { null }
             }
         }
+        loading = false
     }
-    Box(Modifier.fillMaxSize().background(Color(0xFF24242A)), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxSize().background(Color(0xFF24242A)), contentAlignment = Alignment.Center) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), contentDescription = if (media.video) "Video" else "Photo",
             modifier = Modifier.fillMaxSize(), contentScale = if (large) ContentScale.Fit else ContentScale.Crop)
-        else Text("Unavailable", style = MaterialTheme.typography.labelSmall)
-        if (media.video) Text("▶", modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp))
+        else if (loading) CircularProgressIndicator(Modifier.size(24.dp))
+        else Text("Cannot open media", color = Color.White, style = MaterialTheme.typography.labelSmall)
+        if (media.video) Text("▶", color = Color.White, modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp))
+    }
+}
+
+// Keep translation bounded by the viewport; returning to fit always clears pan.
+internal fun boundedGalleryPan(pan: Offset, scale: Float, size: IntSize): Offset {
+    val x = size.width * (scale - 1f).coerceAtLeast(0f) / 2f
+    val y = size.height * (scale - 1f).coerceAtLeast(0f) / 2f
+    return Offset(pan.x.coerceIn(-x, x), pan.y.coerceIn(-y, y))
+}
+
+internal fun toggleGallerySelection(ids: List<String>, id: String): ArrayList<String> =
+    ArrayList(if (id in ids) ids - id else ids + id)
+
+@Composable
+private fun ZoomablePhoto(media: GalleryMedia, active: Boolean, onZoom: (Boolean) -> Unit) {
+    var scale by remember(media.uri) { mutableFloatStateOf(1f) }
+    var pan by remember(media.uri) { mutableStateOf(Offset.Zero) }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(active) { scale = 1f; pan = Offset.Zero }
+    LaunchedEffect(scale, active) { if (active) onZoom(scale > 1f) }
+    val transform = rememberTransformableState { zoom, offset, _ ->
+        scale = (scale * zoom).coerceIn(1f, 5f)
+        pan = boundedGalleryPan(pan + offset, scale, size)
+    }
+    Box(Modifier.fillMaxSize().clipToBounds().onSizeChanged { size = it }
+        .pointerInput(media.uri) {
+            detectTapGestures(onDoubleTap = { point ->
+                scale = if (scale > 1f) 1f else 2.5f
+                pan = boundedGalleryPan((Offset(size.width / 2f, size.height / 2f) - point) * (scale - 1f), scale, size)
+            })
+        }
+        .transformable(state = transform, canPan = { scale > 1f })) {
+        MediaImage(media, large = true, modifier = Modifier.graphicsLayer {
+            scaleX = scale; scaleY = scale; translationX = pan.x; translationY = pan.y
+        })
     }
 }
 
@@ -173,6 +220,8 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
         if (status == "Loading photos…") return@LaunchedEffect
         val accessibleIds = media.mapTo(hashSetOf()) { it.uri.toString() }
         selectedIds = ArrayList(selectedIds.filter { it in accessibleIds })
+        if (selectedIds.isEmpty()) selecting = false
+        if (selected !in accessibleIds) selected = null
     }
     Column(modifier) {
         if (selecting) Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
@@ -196,7 +245,7 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
                     Box(Modifier.aspectRatio(1f).combinedClickable(
                         onClick = {
                             val id = entry.uri.toString()
-                            if (selecting) selectedIds = ArrayList(if (id in selectedIds) selectedIds - id else selectedIds + id)
+                            if (selecting) selectedIds = toggleGallerySelection(selectedIds, id)
                             else selected = id
                         },
                         onLongClickLabel = "Select media",
@@ -215,17 +264,28 @@ internal fun LocalGallery(modifier: Modifier = Modifier, gridState: LazyGridStat
     }
     val initial = media.indexOfFirst { it.uri.toString() == selected }
     if (initial >= 0) Dialog(onDismissRequest = { selected = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        var zoomed by remember { mutableStateOf(false) }
         val pager = rememberPagerState(initialPage = initial, pageCount = { media.size })
+        LaunchedEffect(pager) {
+            snapshotFlow { pager.settledPage }.collect { page ->
+                selected = media[page].uri.toString()
+                zoomed = false
+            }
+        }
         BackHandler { selected = null }
         Box(Modifier.fillMaxSize().background(Color.Black)) {
-            HorizontalPager(pager, modifier = Modifier.fillMaxSize(), key = { media[it].uri.toString() }) { index ->
+            HorizontalPager(pager, userScrollEnabled = !zoomed, modifier = Modifier.fillMaxSize(), key = { media[it].uri.toString() }) { index ->
                 val entry = media[index]
-                if (entry.video && index == pager.currentPage) AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx ->
-                    VideoView(ctx).apply { setVideoURI(entry.uri); setMediaController(MediaController(ctx).also { it.setAnchorView(this) }); setOnPreparedListener { start() } }
+                var videoError by remember(entry.uri) { mutableStateOf(false) }
+                if (videoError) Text("Cannot play video", color = Color.White, modifier = Modifier.align(Alignment.Center))
+                else if (entry.video && index == pager.currentPage) AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx ->
+                    VideoView(ctx).apply { setVideoURI(entry.uri); setMediaController(MediaController(ctx).also { it.setAnchorView(this) }); setOnPreparedListener { start() }; setOnErrorListener { _, _, _ -> videoError = true; true } }
                 }, onRelease = { it.stopPlayback() })
+                else if (!entry.video) ZoomablePhoto(entry, index == pager.currentPage) { zoomed = it }
                 else MediaImage(entry, large = true)
             }
-            Row(Modifier.statusBarsPadding()) {
+            Row(Modifier.statusBarsPadding().background(Color.Black.copy(alpha = 0.7f))) {
+                Text("${pager.currentPage + 1} / ${media.size}", color = Color.White, modifier = Modifier.padding(12.dp))
                 TextButton(onClick = { selected = null }) { Text("Close") }
                 TextButton(onClick = { backup(setOf(media[pager.currentPage].uri.toString())) }) { Text("Back up") }
                 selectionError?.let { Text(it) }

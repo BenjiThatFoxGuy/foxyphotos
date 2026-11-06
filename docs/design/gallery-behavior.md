@@ -37,3 +37,10 @@ Immich mobile was studied in a separate research pass at commit `3758c4e9598773d
 Research provenance: https://github.com/immich-app/immich/tree/3758c4e9598773d4c237e687b37edde214c94053/mobile
 
 The inspected upstream root license is AGPLv3; no mobile-wide permissive override was found. FoxyPhotos remains Apache 2.0. No Immich code or assets are incorporated by this specification. Any future third-party reuse requires checking its exact license and notices before integration. A license change requires a separate decision, not an automatic consequence of studying an app's behavior.
+
+## Viewer interaction refresh
+
+- Photos support native pinch zoom (1–5×), bounded pan and double tap between fit and 2.5× at the tapped point. At fit, horizontal swipes page; while zoomed, gestures pan the photo. Return to fit to page. Paging resets zoom/pan.
+- Viewer shows collection position and retains the current media URI on configuration changes. Settings round trips retain gallery selection and viewer state; the host retains grid position.
+- Selection stays URI-based, drops inaccessible items after a query completes and exits when no selected items remain. Upload still requires an explicit Back up action.
+- Thumbnail loading and failed reads have distinct feedback; failed native video playback reports an inline error.

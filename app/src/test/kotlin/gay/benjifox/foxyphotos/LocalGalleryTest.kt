@@ -18,6 +18,22 @@ import org.robolectric.shadows.ShadowContentResolver
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
 class LocalGalleryTest {
+    @Test fun selectionUsesStableUrisAndNeverAddsNeighbors() {
+        val first = "content://media/images/1"
+        val second = "content://media/images/2"
+        val selected = toggleGallerySelection(listOf(first), second)
+        assertEquals(listOf(first, second), selected)
+        assertEquals(listOf(second), toggleGallerySelection(selected, first))
+        assertEquals(emptyList<String>(), toggleGallerySelection(listOf(second), second))
+    }
+
+    @Test fun zoomPanIsBoundedAndFitClearsTranslation() {
+        val size = androidx.compose.ui.unit.IntSize(200, 400)
+        val pan = androidx.compose.ui.geometry.Offset(999f, -999f)
+        assertEquals(androidx.compose.ui.geometry.Offset(100f, -200f), boundedGalleryPan(pan, 2f, size))
+        assertEquals(androidx.compose.ui.geometry.Offset.Zero, boundedGalleryPan(pan, 1f, size))
+    }
+
     @Test fun cancellingBlockedQueryCancelsProviderBeforeItReturnsAndClosesCursor() = runBlocking {
         val entered = java.util.concurrent.CountDownLatch(1)
         val cancelled = java.util.concurrent.CountDownLatch(1)

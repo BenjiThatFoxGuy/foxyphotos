@@ -67,3 +67,11 @@ Implementation commit: `09ff19e`. Parent verification: full check, debug assembl
 - Android only now; reusable provider/core boundaries ready for later platform work, no claim of an iOS build.
 - iCloud remains a hidden unavailable auth scaffold pending Photos-upload research. No iCloud UI or fake upload success.
 - No new release tags or publishing inferred from this checklist. Distinguish local implementation, tested builds and published delivery.
+
+## Current: viewer interaction refresh
+
+- [x] Source: native bounded pinch/pan and double-tap zoom, pager gesture gating and reset on paging.
+- [x] Source: URI selection cleanup, saved gallery state across Settings and configuration changes, viewer position count and media loading/error feedback.
+- [x] Local: whitespace checks and 19 release automation Python tests; focused JVM selection/pan regressions added for CI.
+- [ ] CI build/check/lint and signed APK provenance verification (tracked in delivery report).
+- No local Gradle, SDK, emulator or dependency download; no backup authorization or provider changes.
