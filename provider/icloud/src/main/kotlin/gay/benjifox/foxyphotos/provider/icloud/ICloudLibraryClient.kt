@@ -29,9 +29,10 @@ internal class AppleWire : ICloudWire {
         .callTimeout(30, TimeUnit.SECONDS).build()
     override suspend fun send(url: String, json: String?, cookies: String?, limit: Int): ICloudReply {
         val builder = Request.Builder().url(url)
-        if (json != null) builder.post(json.toRequestBody("text/plain".toMediaType()))
+        if (json != null) builder.post(json.toRequestBody((if (json.isEmpty()) "application/json" else "text/plain").toMediaType()))
         if (cookies != null) builder.header("Cookie", cookies).header("Origin", "https://www.icloud.com")
             .header("Referer", "https://www.icloud.com/")
+            .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:103.0) Gecko/20100101 Firefox/103.0")
         val call = http.newCall(builder.build())
         return suspendCancellableCoroutine { cont ->
             cont.invokeOnCancellation { call.cancel() }
@@ -188,7 +189,7 @@ class ICloudLibraryClient internal constructor(
         pageLocked(album.first, album.second, cursor)
     }
     private suspend fun pageLocked(zone: String, album: String?, cursor: String?): LibraryPage {
-        if (pageCalls >= 50) throw IOException("iCloud session request limit reached. Reopen the library.")
+        if (pageCalls >= 50 || resources.size > 5000 || masters.size > 5000) throw IOException("iCloud session request limit reached. Reopen the library.")
         val offset = cursor?.toInt() ?: 0
         require(offset in 0..5000)
         val filters = JSONArray().put(filter("startRank", "INT64", offset)).put(filter("direction", "STRING", "ASCENDING"))

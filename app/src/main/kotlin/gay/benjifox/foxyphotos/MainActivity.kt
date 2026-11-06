@@ -353,7 +353,7 @@ private fun FoxyPhotosApp() {
                 )
             } else Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (screen != "main") TextButton(onClick = { screen = if (screen == "folders" || screen == "connect") "settings" else "main" }) { Text("Back") }
-                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; "combined" -> "Combined library"; else -> "FoxyPhotos" },
+                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; "combined" -> "Combined library"; "icloud-library" -> "iCloud library"; else -> "FoxyPhotos" },
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 if (screen == "main") {
                     if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Combined") }
