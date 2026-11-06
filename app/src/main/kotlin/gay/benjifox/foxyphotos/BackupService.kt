@@ -17,7 +17,10 @@ internal object BackupRuntime {
     val state = mutableState.asStateFlow()
     fun command(context: Context, action: String) {
         val policy = AndroidBackupPolicy(context)
-        if (action == BackupService.PAUSE) policy.pause(null)
+        if (action == BackupService.PAUSE) {
+            policy.pause(null)
+            if (BackupExecution.jobCancellation != null) return
+        }
         if (action == BackupService.RESUME) policy.resume()
         if (action == BackupService.CANCEL) {
             policy.finish()

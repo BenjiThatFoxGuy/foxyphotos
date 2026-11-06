@@ -22,6 +22,15 @@ class BackupPolicyIntegrationTest {
         assertEquals(setOf("content://media/external/images/media/1"), AndroidBackupPolicy(context).request())
         BackupRuntime.mutableState.value = BackupSnapshot()
     }
+    @Test fun backwardClockPermanentlyExpiresGrantInsteadOfReactivatingLater() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val policy = AndroidBackupPolicy(context)
+        policy.prefs.edit().clear().commit()
+        policy.timer("override", 900000)
+        policy.prefs.edit().putLong("override-created", System.currentTimeMillis() + 100000).commit()
+        assertFalse(policy.timerActive("override"))
+        assertFalse(policy.prefs.contains("override-created"))
+    }
     @Test fun timedPauseAndExceptionClocksRemainIndependentAcrossBlockerChurn() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val policy = AndroidBackupPolicy(context)

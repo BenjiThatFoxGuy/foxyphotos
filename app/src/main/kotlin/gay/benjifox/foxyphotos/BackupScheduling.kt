@@ -36,7 +36,7 @@ internal object BackupScheduling {
             if (scheduler.getPendingJob(PERIODIC) == null) scheduler.schedule(JobInfo.Builder(PERIODIC, component)
                 .setPeriodic(15 * 60_000L).setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPersisted(true).build())
             if (p.timerActive("immediate")) {
-                if (rearmContent || scheduler.getPendingJob(CONTENT) == null) scheduler.schedule(JobInfo.Builder(CONTENT, component)
+                if (BackupExecution.runningJobId != CONTENT && (rearmContent || scheduler.getPendingJob(CONTENT) == null)) scheduler.schedule(JobInfo.Builder(CONTENT, component)
                     .addTriggerContentUri(JobInfo.TriggerContentUri(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, JobInfo.TriggerContentUri.FLAG_NOTIFY_FOR_DESCENDANTS))
                     .addTriggerContentUri(JobInfo.TriggerContentUri(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, JobInfo.TriggerContentUri.FLAG_NOTIFY_FOR_DESCENDANTS))
                     .setTriggerContentUpdateDelay(1000).setTriggerContentMaxDelay(5000)
@@ -50,6 +50,7 @@ internal object BackupScheduling {
         val deadlines = listOf("pause", "override", "immediate").filter { p.timerActive(it) }.map {
             p.prefs.getLong("$it-created", now) + p.prefs.getLong("$it-duration", 0) - now
         }
+        if (BackupExecution.runningJobId == TIMER) return
         if (deadlines.isNotEmpty() || p.prefs.getBoolean("request-pending", false)) {
             val delay = deadlines.minOrNull()?.coerceAtLeast(1000) ?: 60_000L
             scheduler.schedule(JobInfo.Builder(TIMER, component).setMinimumLatency(minOf(delay, 60_000L)).build())
@@ -106,7 +107,7 @@ internal class BackupJobService : JobService() {
         }
         return true
     }
-    override fun onStopJob(params: JobParameters): Boolean { val p = AndroidBackupPolicy(this); if (p.prefs.getBoolean("override-batch", false)) p.endOverride(); scope?.cancel(); return false }
+    override fun onStopJob(params: JobParameters): Boolean { if (params.jobId == BackupExecution.runningJobId) { val p = AndroidBackupPolicy(this); if (p.prefs.getBoolean("override-batch", false)) p.endOverride(); scope?.cancel() }; return false }
     override fun onDestroy() { scope?.cancel(); super.onDestroy() }
 }
 class BackupBootReceiver : BroadcastReceiver() {

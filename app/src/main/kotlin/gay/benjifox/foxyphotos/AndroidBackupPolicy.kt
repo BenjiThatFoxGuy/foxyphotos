@@ -15,9 +15,11 @@ internal class AndroidBackupPolicy(private val context: Context) {
     private fun boot() = Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, 0)
     fun timerActive(key: String): Boolean {
         if (!prefs.contains("$key-created")) return false
-        return PolicyTimer(prefs.getLong("$key-created", 0), prefs.getLong("$key-duration", 0),
+        val active = PolicyTimer(prefs.getLong("$key-created", 0), prefs.getLong("$key-duration", 0),
             prefs.getLong("$key-elapsed", 0), prefs.getInt("$key-boot", 0))
             .active(System.currentTimeMillis(), SystemClock.elapsedRealtime(), boot())
+        if (!active) clearTimer(key)
+        return active
     }
     fun timer(key: String, duration: Long) {
         prefs.edit().putLong("$key-created", System.currentTimeMillis()).putLong("$key-duration", duration)
