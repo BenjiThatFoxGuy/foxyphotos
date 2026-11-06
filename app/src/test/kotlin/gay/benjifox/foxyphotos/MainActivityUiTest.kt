@@ -341,7 +341,7 @@ class MainActivityUiTest {
                             android.provider.MediaStore.MediaColumns.DATE_ADDED -> 0L
                             else -> null
                         }
-                    }.toTypedArray())
+                    }.toTypedArray<Any?>())
                 }
             override fun getType(uri: android.net.Uri) = null
             override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
