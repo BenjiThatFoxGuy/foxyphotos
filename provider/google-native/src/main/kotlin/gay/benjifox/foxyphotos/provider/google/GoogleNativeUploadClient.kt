@@ -46,6 +46,13 @@ class GoogleNativeUploadClient internal constructor(
         }
     }
 
+    /** Read-only presence check in the currently authenticated account; never uploads bytes. */
+    suspend fun findExisting(credential: GoogleCredential, sha1: ByteArray): String? = withContext(Dispatchers.IO) {
+        require(sha1.size == SHA1_LENGTH)
+        val trace = UploadDiagnosticTrace(diagnostics, UploadFileType.OTHER, 0)
+        checkExisting(sha1, authorization(credential), trace)
+    }
+
     private suspend fun checkExisting(sha1: ByteArray, authorization: String, trace: UploadDiagnosticTrace): String? =
         postProtobuf(
             endpoint = GoogleNativeProtocol.hashCheckEndpoint,

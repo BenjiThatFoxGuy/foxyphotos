@@ -109,7 +109,7 @@ internal object GoogleNativeProtocol {
         throw GoogleProtocolException("Malformed Google protobuf response.")
     }
 
-    private fun varintField(field: Int, value: Long): ByteArray =
+    internal fun varintField(field: Int, value: Long): ByteArray =
         encodeVarint((field shl 3).toLong()) + encodeVarint(value)
 
     internal fun bytesField(field: Int, value: ByteArray): ByteArray =

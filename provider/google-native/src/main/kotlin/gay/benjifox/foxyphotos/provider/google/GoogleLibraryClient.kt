@@ -13,8 +13,8 @@ import java.util.concurrent.TimeUnit
 class GoogleLibraryClient(
     private val credential: suspend () -> GoogleCredential,
     private val auth: GoogleAuthClient = GoogleAuthClient(),
-) : ReadOnlyLibrary, RemoteOriginalReader {
-    private val http = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+) : ReadOnlyLibrary, RemoteOriginalReader, GoogleAlbumAccess {
+    private val http = OkHttpClient.Builder().retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
         .callTimeout(30, TimeUnit.SECONDS).build()
 
     override suspend fun page(cursor: String?): LibraryPage {
@@ -24,6 +24,30 @@ class GoogleLibraryClient(
             .post(GoogleLibraryProtocol.request(cursor).toRequestBody("application/x-protobuf".toMediaType())).build()
         return GoogleLibraryProtocol.decode(fetch(request, 8 * 1024 * 1024))
     }
+
+    override suspend fun albumPage(cursor: String?): GoogleAlbumPage {
+        val request = authenticated("https://photosdata-pa.googleapis.com/6439526531001121323/18047484249733410717")
+            .header("X-Goog-Ext-173412678-Bin", "CgcIAhClARgC")
+            .header("X-Goog-Ext-174067345-Bin", "CgIIAg==")
+            .post(GoogleLibraryProtocol.request(cursor).toRequestBody("application/x-protobuf".toMediaType())).build()
+        return GoogleAlbumProtocol.decode(fetch(request, 8 * 1024 * 1024))
+    }
+
+    /** No retry: a response loss can follow a committed remote write. */
+    override suspend fun createAlbum(title: String): String {
+        require(title.isNotBlank() && title.length <= 500)
+        val bytes = albumWrite("8386163679468898444", GoogleAlbumProtocol.create(title))
+        return GoogleAlbumProtocol.createdId(bytes)
+    }
+
+    /** HTTP acknowledgement is deliberately NOT membership confirmation. */
+    override suspend fun requestMembership(albumId: String, mediaKey: String) {
+        albumWrite("484917746253879292", GoogleAlbumProtocol.add(albumId, mediaKey))
+    }
+
+    private suspend fun albumWrite(endpoint: String, bytes: ByteArray): ByteArray = fetch(
+        authenticated("https://photosdata-pa.googleapis.com/6439526531001121323/$endpoint")
+            .post(bytes.toRequestBody("application/x-protobuf".toMediaType())).build(), 1024 * 1024)
 
     override suspend fun preview(id: String, large: Boolean): ByteArray {
         require(id.isNotBlank() && id.length <= 4096)
@@ -71,12 +95,12 @@ class GoogleLibraryClient(
             }
     }
 
-    private suspend fun authenticated(url: String): Request.Builder = Request.Builder().url(url)
+    internal suspend fun authenticated(url: String): Request.Builder = Request.Builder().url(url)
         .header("Authorization", auth.exchange(credential()).authorizationHeader())
         .header("User-Agent", "Google Photos/49029607 (Pixel XL; Android 9)")
         .header("Accept-Language", "en-US")
 
-    private suspend fun fetch(request: Request, limit: Int): ByteArray = http.newCall(request).consumeCancellable { response ->
+    internal suspend fun fetch(request: Request, limit: Int): ByteArray = http.newCall(request).consumeCancellable { response ->
         if (response.code == 401 || response.code == 403) {
             auth.clearCachedSession()
             throw GoogleAuthenticationException("Google library access denied. Reconnect Google Photos in Settings.")

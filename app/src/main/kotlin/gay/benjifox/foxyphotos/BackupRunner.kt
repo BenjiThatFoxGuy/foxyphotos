@@ -20,6 +20,7 @@ internal suspend fun <Item, Hash> runBackup(
     shouldPause: () -> Boolean = { false },
     onProgress: (BackupCounts) -> Unit = {},
     diagnostics: gay.benjifox.foxyphotos.core.model.DiagnosticSink = gay.benjifox.foxyphotos.core.model.DiagnosticSink.NONE,
+    onConfirmed: suspend (Item, Hash) -> Unit = { _, _ -> },
 ): BackupRunResult = gay.benjifox.foxyphotos.core.backup.runBackup(
     items, hash, isCommitted,
     upload = { item, hashed ->
@@ -27,5 +28,5 @@ internal suspend fun <Item, Hash> runBackup(
         catch (_: gay.benjifox.foxyphotos.provider.google.GoogleUploadDeferredException) { BackupItemOutcome.Deferred }
         catch (_: GoogleUploadUncertainException) { BackupItemOutcome.Uncertain }
     },
-    recordCommitted, shouldPause, onProgress, diagnostics,
+    recordCommitted, shouldPause, onProgress, diagnostics, onConfirmed,
 )

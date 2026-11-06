@@ -2,6 +2,7 @@ package gay.benjifox.foxyphotos.core.model
 
 /** Closed vocabulary: no caller-supplied messages, identifiers or network payloads. */
 enum class DiagnosticStep(val title: String) {
+    ALBUM_MAPPING("Folder album mapping attempted; membership requires separate confirmation"), ALBUM_PAGE("Google album page requested"),
     CLEANUP_PREVIEW("Cleanup preview started"), CLEANUP_AUTHORIZE("Cleanup system authorization requested"), CLEANUP_TRASHED("Verified local item moved to trash"),
     LIBRARY_PAGE("Google library page requested"), AUTO_CHECK("Automatic update check requested"), MANUAL_CHECK("Manual update check requested"),
     THROTTLED("Check skipped: checked within 24 hours"), DISABLED("Check skipped: automatic checks disabled"),

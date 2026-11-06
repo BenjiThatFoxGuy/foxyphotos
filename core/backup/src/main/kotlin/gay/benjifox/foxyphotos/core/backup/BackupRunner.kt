@@ -41,6 +41,7 @@ suspend fun <Item, Hash> runBackup(
     shouldPause: () -> Boolean = { false },
     onProgress: (BackupCounts) -> Unit = {},
     diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+    onConfirmed: suspend (Item, Hash) -> Unit = { _, _ -> },
 ): BackupRunResult {
     var counts = BackupCounts()
     fun emit(step: DiagnosticStep) = diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, step,
@@ -56,6 +57,7 @@ suspend fun <Item, Hash> runBackup(
             val hashed = hash(item)
             if (isCommitted(hashed)) {
                 counts = counts.copy(alreadyPresent = counts.alreadyPresent + 1)
+                if (!shouldPause()) onConfirmed(item, hashed)
             } else {
                 // Hashing can outlast a network transition or a temporary exception.
                 if (shouldPause()) return BackupRunResult(counts, paused = true)
@@ -66,6 +68,7 @@ suspend fun <Item, Hash> runBackup(
                         recordCommitted(hashed, result.mediaKey)
                         counts = if (result.alreadyPresent) counts.copy(alreadyPresent = counts.alreadyPresent + 1)
                         else counts.copy(uploaded = counts.uploaded + 1)
+                        if (!shouldPause()) onConfirmed(item, hashed)
                     }
                     BackupItemOutcome.Deferred -> { emit(DiagnosticStep.CONDITION_WAIT); return BackupRunResult(counts, paused = true, waiting = true) }
                     BackupItemOutcome.Uncertain -> counts = counts.copy(uncertain = counts.uncertain + 1)

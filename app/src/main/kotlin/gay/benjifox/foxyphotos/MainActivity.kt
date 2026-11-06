@@ -362,7 +362,9 @@ private fun FoxyPhotosApp() {
                     IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
                 }
             }
-            if (screen == "cleanup") {
+            if (screen == "albums") {
+                Box(Modifier.weight(1f)) { AlbumBrowser() }
+            } else if (screen == "cleanup") {
                 Box(Modifier.weight(1f)) { VerifiedCleanupScreen() }
             } else if (screen == "icloud-library" && icloudEnabled) {
                 Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }, includeICloud = true) }
@@ -378,6 +380,7 @@ private fun FoxyPhotosApp() {
                 when (screen) {
                     "settings" -> {
                         item { UpdateControls(updater) }
+                        item { FolderAlbumSettings(open = { screen = "albums" }) }
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Experimental local + Google + iCloud library", Modifier.weight(1f))

@@ -43,6 +43,10 @@ internal class AndroidBackupWork(private val context: Context) {
             diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, DiagnosticStep.PLAN, count = media.size, failed = unavailable))
             // Removed folders never remain eligible on a later resume.
             policy.storeRequest(media.map { it.uri.toString() }.toSet(), explicit = policy.allowedFolders() == null)
+            val albumClient = GoogleLibraryClient(credential = { credential })
+            val folderAlbums = FolderAlbums(context, credential.accountEmail, albumClient)
+            var albumChecks = 0
+            val albumFolders = media.map { albumFolderIdentity(it.uri, it.relativePath) }.toSet()
             var currentItem: String? = null
             var currentFolder: String? = null
             var counts = BackupCounts(failed = unavailable)
@@ -98,6 +102,21 @@ internal class AndroidBackupWork(private val context: Context) {
                     }
                 },
                 recordCommitted = { hashed, key -> ledger.recordCommitted(hashed.sha256, key) },
+                onConfirmed = { item, hashed ->
+                    if (FolderAlbums.enabled(context) && albumChecks++ < 20 && !shouldPause() && policy.reasons(item.uri.toString()).isEmpty()) {
+                        diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.LIBRARY, DiagnosticStep.ALBUM_MAPPING))
+                        val message = try {
+                            // The legacy upload ledger is not account-scoped. Resolve presence read-only
+                            // in the current account before reusing any key for album writes.
+                            val key = client.findExisting(credential, hashed.sha1)
+                            if (key == null) "Upload identity unavailable; no album write" else folderAlbums.associate(
+                                albumFolderIdentity(item.uri, item.relativePath), albumFolders, key,
+                                admitted = { FolderAlbums.enabled(context) && !shouldPause() && policy.allowsFolder(item.relativePath) && policy.reasons(item.uri.toString()).isEmpty() })
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { "Album operation unavailable or uncertain; upload retained, no automatic write replay" }
+                        FolderAlbums.status(context, message)
+                    }
+                },
                 shouldPause = { shouldPause() || (currentFolder?.let { !policy.allowsFolder(it) } == true) || policy.reasons(currentItem).isNotEmpty() },
                 onProgress = {
                     val failed = it.failed + unavailable > counts.failed || it.uncertain > counts.uncertain
