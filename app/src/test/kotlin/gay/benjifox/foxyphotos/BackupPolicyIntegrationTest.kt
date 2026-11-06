@@ -11,6 +11,29 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class BackupPolicyIntegrationTest {
+    @Test fun explicitItemScanNeverQueriesNeighborsOrChangesFolderInclusion() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val queried = mutableListOf<String>()
+        val ids = setOf("content://media/external/images/media/7", "content://media/external/video/media/9")
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("media", object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?): android.database.Cursor {
+                queried += uri.toString()
+                return android.database.MatrixCursor(projection!!).apply { addRow(arrayOf<Any>("item.jpg", 10L, 100L, "Excluded/")) }
+            }
+            override fun getType(uri: android.net.Uri) = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
+            override fun delete(uri: android.net.Uri, selection: String?, args: Array<out String>?) = 0
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = 0
+        })
+        val policy = AndroidBackupPolicy(context)
+        policy.prefs.edit().clear().putStringSet("enabled-folders", setOf("Camera/")).commit()
+        val media = gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner(context.contentResolver).scanSelectedItems(ids)
+        assertEquals(ids, queried.toSet())
+        assertEquals(ids, media.map { it.uri.toString() }.toSet())
+        assertTrue(media.all { it.relativePath == "Excluded/" })
+        assertEquals(setOf("Camera/"), policy.prefs.getStringSet("enabled-folders", emptySet()))
+    }
     @Test fun explicitSelectionIsPersistedAndBusyAdmissionPreservesOriginal() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences(BackupService.SETTINGS, 0).edit().clear().commit()
