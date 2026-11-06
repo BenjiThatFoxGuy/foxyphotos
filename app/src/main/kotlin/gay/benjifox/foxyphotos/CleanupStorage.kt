@@ -35,7 +35,7 @@ internal class CleanupStorage(private val context: Context) {
             val size = c.getLong(0)
             val folder = c.getString(2) ?: error("Folder unavailable")
             val version = MediaStore.getVersion(context, MediaStore.getVolumeName(uri))
-            CleanupLocal(uri, "$uri|$version|$size|${c.getLong(1)}|${c.getLong(3)}|${c.getLong(4)}|$folder", folder, size, c.getString(7))
+            CleanupLocal(uri, "$uri|$version|$size|${c.getLong(1)}|${c.getLong(3)}|${c.getLong(4)}|$folder", folder, size, c.getString(7), c.getLong(3))
         } ?: error("Media unavailable")
     }
 
@@ -55,4 +55,4 @@ internal class CleanupStorage(private val context: Context) {
             VerifiedCleanup.admit(verification, enabled(), folders(), after.identity, hash, after.size, System.currentTimeMillis())
     }
 }
-internal data class CleanupLocal(val uri: Uri, val identity: String, val folder: String, val size: Long, val name: String)
+internal data class CleanupLocal(val uri: Uri, val identity: String, val folder: String, val size: Long, val name: String, val generation: Long)

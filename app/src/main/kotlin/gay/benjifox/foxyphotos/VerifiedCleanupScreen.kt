@@ -74,11 +74,10 @@ internal fun VerifiedCleanupScreen() {
                         currentCoroutineContext().ensureActive()
                         val local = storage.snapshot(row.local.uri)
                         check(local.identity == v.upload.localIdentity && storage.enabled() && local.folder in storage.folders())
-                        val generation = local.identity.split('|')[4]
                         val changed = context.contentResolver.update(row.local.uri,
                             ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) },
                             "generation_modified = ? AND _size = ? AND is_pending = 0 AND is_trashed = 0",
-                            arrayOf(generation, local.size.toString()))
+                            arrayOf(local.generation.toString(), local.size.toString()))
                         check(changed == 1)
                     } })
                     rows = rows.filterNot { it.local.uri == row.local.uri }
@@ -176,9 +175,9 @@ internal fun VerifiedCleanupScreen() {
             confirmButton = { TextButton(onClick = {
                 confirm = null
                 try {
-                    check(Build.VERSION.SDK_INT >= 30)
                     pending = row
-                    val request = MediaStore.createWriteRequest(context.contentResolver, listOf(row.local.uri))
+                    val request = if (Build.VERSION.SDK_INT >= 30) MediaStore.createWriteRequest(context.contentResolver, listOf(row.local.uri))
+                        else error("System trash authorization unavailable")
                     authorization.launch(IntentSenderRequest.Builder(request.intentSender).build())
                     event(DiagnosticStep.CLEANUP_AUTHORIZE)
                 } catch (_: Exception) { pending = null; status = "System authorization unavailable. File preserved." }
