@@ -13,9 +13,9 @@ Deliver each usable green slice rather than waiting for this entire roadmap. Do 
 - [ ] 0. Finish current gallery refresh and deliver its verified signed nightly.
 - [ ] 1. Experimental combined local + Google Photos library, explicitly enabled in Settings and off by default.
 - [ ] 2. After milestone 1 is implemented and builds green, add a separate opt-in experimental local + Google Photos + iCloud library view, off by default.
-- [ ] 3. Experimental explicit storage-to-storage transfer batches, initially iCloud download to Google Photos upload. No iCloud upload requirement.
-- [ ] 4. Experimental verified local cleanup, off by default, with its own device-local folder whitelist and later-run remote content verification.
-- [ ] 5. Optional deriving Google Photos album names from local folder names, with safe existing-album lookup/reuse before creation.
+- [ ] 3. Prioritize experimental verified local cleanup, off by default, with its own device-local folder whitelist and later-run remote content verification. This is the highest-priority functional convenience after the required provider groundwork.
+- [ ] 4. Prototype real album/folder browsing and optional local-folder-to-Google-album name matching, with safe existing-album lookup/reuse before creation. Research album capacity before album writes.
+- [ ] 5. Lower-priority experimental manual storage-to-storage transfer batches from the album/folder UI, initially iCloud to Google Photos, with Copy and Move choices and album preservation. Build a minimal usable prototype; fuller product scoping follows later. No iCloud upload requirement.
 
 Record concrete implementation, CI evidence, delivery and remaining provider limitations below each milestone as work progresses. Research may show prerequisites that require reordering supporting implementation, but do not silently substitute fake provider data for a working milestone.
 
@@ -31,11 +31,13 @@ This explicitly reopens earlier deferred iCloud work ONLY for authenticating, li
 
 The third view must be gated separately and only added after the Google combined view builds. Show unavailable/error state if auth is absent, not synthetic content. Test adapter behavior with offline fixtures; report live verification separately.
 
-## 3. Explicit transfer batches
+## 5. Manual transfer prototype (lower priority)
 
-The long-term use case is freeing paid iCloud capacity by copying chosen batches to Google Photos. Start copy-first: explicit source selection, bounded queue, progress, pause/cancel, retries and truthful confirmed/uncertain outcomes. Download to bounded app-private staging; verify source bytes where feasible before uploading through existing Google adapter. Do not automatically delete source cloud assets. Freeing source capacity requires a separately explicit destructive user confirmation and verified destination safety; do not infer that authorization from a transfer request. Unsupported Apple upload is not a blocker for iCloud-to-Google direction.
+The long-term use case is freeing paid iCloud capacity by transferring chosen albums/batches to Google Photos. Entry is a manual menu action from the real folder/album browsing UI, with an explicit Copy or Move choice, not an automatic migration daemon. Preserve source album organization at the destination using confirmed album identities and safe matching. Keep the first prototype narrow; detailed transfer UX and broader policy will be scoped later.
 
-## 4. Verified local cleanup
+Both actions first copy: explicit source selection, bounded queue/staging, progress, pause/cancel, retries and truthful confirmed/uncertain outcomes. A Move request additionally requires explicit destructive confirmation and verified destination safety before source removal. Never delete source items on upload receipt alone, failed/uncertain transfer, cancellation, or unresolved membership. If safe remote verification/deletion cannot yet be implemented, disable Move with an honest reason rather than silently treating Copy as Move. No real cloud deletion during development or tests. Unsupported Apple upload is not a blocker for iCloud-to-Google direction.
+
+## 3. Verified local cleanup
 
 Separate global opt-in and device-local folder whitelist, both off/empty by default. Backup-folder selection does not grant deletion authorization. Only items successfully uploaded in an earlier run become verification candidates in a later run. Example: upload photo A in run 1; in run 2 fetch the actual corresponding remote media bytes and compare a content hash with current local bytes. Upload success, existence lookup, thumbnail, remote metadata, filename or provider hash claim alone is insufficient.
 
@@ -43,7 +45,15 @@ Cleanup requires a byte-for-byte content hash match from an actual remote downlo
 
 Implement policy, durable evidence and a safe preview first. Do not execute real device deletion during development/testing. Enabling the feature is not permission for development scripts to remove files. Use fixtures and narrow injected adapters to test negative safety cases. Unknown/expired evidence must fail closed. Never delete cloud originals in this milestone.
 
-## 5. Folder-derived Google albums
+## 4. Folder-derived Google albums and browsing
+
+Quality of life is the product priority: a lean native client that can map phone folder A to backend album A, not merely another uploader. Prototype browsing real provider albums and local folders alongside the optional mapping. Keep future iOS reuse in the core; no iOS implementation in this goal.
+
+### Sticky research requirement: Google Photos album capacity
+
+**UNVERIFIED user-reported claim: Google Photos may limit an individual album to 20,000 photos.** This is an album limit claim, not an account/storage quota claim. Do not present it as confirmed until researched. Fact-check current authoritative Google documentation, investigate whether photo/video/shared-album rules differ, and trace bclone/gotohp behavior and error responses at pinned revisions. Record sources, retrieval dates, certainty and any gaps. Do not create/fill a huge live album just to test a boundary. Use fixture-based boundary/error tests where possible.
+
+Track capacity handling for BOTH FoxyPhotos and bclone. Record the bclone follow-up in its own durable project documentation/tracker if cross-repo implementation is not part of the current goal; do not silently modify that repository under this app goal. Album-capacity exhaustion must not produce infinite retries, bogus duplicate albums, false membership success or data loss. Do not choose an automatic rollover/naming policy without a documented decision; surface a clear safe capacity result if necessary. Account storage entitlement does not remove a per-album bound.
 
 Optional toggle, default off. Research bclone's Google Photos album lookup/matching/create logic at pinned revision before implementation. Resolve/reuse existing matching albums before creation. Define collision handling for equal leaf folder names and concurrent requests, without silently generating duplicate or bogus albums. Store confirmed provider album identity privately; do not log it. Distinguish album creation, membership and upload confirmation; preserve deduplication so enabling this does not reupload confirmed media unnecessarily. No massive account-wide album changes on toggle alone; act on admitted backup batches.
 
