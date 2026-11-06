@@ -15,6 +15,9 @@ internal class AndroidBackupWork(private val context: Context) {
         progress: (BackupSnapshot) -> Unit,
         shouldPause: () -> Boolean,
     ): BackupRunResult {
+        val cleanupRun = java.util.UUID.randomUUID().toString()
+        val cleanup = CleanupStorage(context)
+        var cleanupBefore: CleanupLocal? = null
         val diagnostics = AppDiagnostics.get(context)
         diagnostics.safelyRecord(DiagnosticEvent(DiagnosticComponent.BACKUP, DiagnosticStep.SCAN))
         val policy = AndroidBackupPolicy(context)
@@ -46,7 +49,12 @@ internal class AndroidBackupWork(private val context: Context) {
             val result = runBackup(
                 items = media,
                 diagnostics = diagnostics,
-                hash = { item -> currentItem = item.uri.toString(); currentFolder = item.relativePath; report(BackupPhase.HASHING); scanner.hash(item) },
+                hash = { item -> currentItem = item.uri.toString(); currentFolder = item.relativePath; report(BackupPhase.HASHING)
+                    cleanupBefore = withContext(Dispatchers.IO) {
+                        try { if (android.os.Build.VERSION.SDK_INT >= 30 && cleanup.enabled() && item.relativePath in cleanup.folders()) cleanup.snapshot(item.uri) else null }
+                        catch (_: Exception) { null }
+                    }
+                    scanner.hash(item) },
                 isCommitted = { ledger.contains(it.sha256) },
                 upload = { item, hashed ->
                     report(BackupPhase.UPLOADING)
@@ -65,7 +73,25 @@ internal class AndroidBackupWork(private val context: Context) {
                         beforeBytes = { !shouldPause() && policy.allowsFolder(item.relativePath) && policy.reasons(item.uri.toString()).isEmpty() },
                         openSource = { context.contentResolver.openInputStream(item.uri) ?: throw IllegalStateException("Media unavailable") },
                     ))) {
-                        is GoogleUploadOutcome.Committed -> BackupUploadResult(outcome.mediaKey)
+                        is GoogleUploadOutcome.Committed -> {
+                            // Only a real commit from this run gets cleanup evidence, never a presence lookup.
+                            // Verification uses unredacted originals; lack of location permission skips evidence.
+                            try {
+                                val before = cleanupBefore
+                                if (before != null) withContext(Dispatchers.IO) {
+                                    val after = cleanup.snapshot(item.uri)
+                                    val digest = cleanup.hash(after)
+                                    if (before == after && cleanup.snapshot(item.uri) == after &&
+                                        digest == hashed.sha256.joinToString("") { "%02x".format(it) }) {
+                                        cleanup.record(item.uri, gay.benjifox.foxyphotos.core.backup.CleanupUploadEvidence(
+                                            after.identity, after.folder, digest, after.size, outcome.mediaKey,
+                                            cleanupRun, System.currentTimeMillis()))
+                                    }
+                                }
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { /* Backup success survives unavailable cleanup evidence. */ }
+                            BackupUploadResult(outcome.mediaKey)
+                        }
                         is GoogleUploadOutcome.Present -> BackupUploadResult(outcome.mediaKey, alreadyPresent = true)
                     }
                 },

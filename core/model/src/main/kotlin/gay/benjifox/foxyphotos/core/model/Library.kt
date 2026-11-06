@@ -19,3 +19,11 @@ interface AlbumReadOnlyLibrary : ReadOnlyLibrary {
     /** Bounded original read for explicitly selected items; never an upload/delete operation. */
     suspend fun read(id: String, maxBytes: Int): ByteArray
 }
+
+/** Digest must come from an actual bounded remote byte stream, never metadata or a preview.
+ * A returned digest makes no original-quality claim until compared to local original bytes.
+ * Implementations throw on authentication, partial, unavailable, oversized or truncated reads.
+ */
+interface RemoteOriginalReader {
+    suspend fun originalHash(id: String, expectedSize: Long): String
+}

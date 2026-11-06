@@ -362,7 +362,9 @@ private fun FoxyPhotosApp() {
                     IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
                 }
             }
-            if (screen == "icloud-library" && icloudEnabled) {
+            if (screen == "cleanup") {
+                Box(Modifier.weight(1f)) { VerifiedCleanupScreen() }
+            } else if (screen == "icloud-library" && icloudEnabled) {
                 Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }, includeICloud = true) }
             } else if (screen == "combined" && combinedEnabled) {
                 Box(Modifier.weight(1f)) { CombinedLibrary(onPermission = { permissionLauncher.launch(requiredPermissions) }) }
@@ -401,6 +403,7 @@ private fun FoxyPhotosApp() {
                             Text("Read-only Google pages and previews. Off by default; uses your saved Google connection.", style = MaterialTheme.typography.bodySmall)
                             if (combinedEnabled) TextButton(onClick = { screen = "combined" }) { Text("Open combined library") }
                         }
+                        item { TextButton(onClick = { screen = "cleanup" }) { Text("Experimental verified local cleanup") } }
                         item { BackupConditionSettings() }
                         item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }
                         item { TextButton(onClick = { showLogs = true }) { Text("View logs...") } }

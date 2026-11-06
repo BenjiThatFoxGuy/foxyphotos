@@ -2,6 +2,7 @@ package gay.benjifox.foxyphotos.core.model
 
 /** Closed vocabulary: no caller-supplied messages, identifiers or network payloads. */
 enum class DiagnosticStep(val title: String) {
+    CLEANUP_PREVIEW("Cleanup preview started"), CLEANUP_AUTHORIZE("Cleanup system authorization requested"), CLEANUP_TRASHED("Verified local item moved to trash"),
     LIBRARY_PAGE("Google library page requested"), AUTO_CHECK("Automatic update check requested"), MANUAL_CHECK("Manual update check requested"),
     THROTTLED("Check skipped: checked within 24 hours"), DISABLED("Check skipped: automatic checks disabled"),
     READY_ARTIFACT("Check skipped: downloaded update pending"), BUSY("Request skipped: updater busy"),
@@ -22,7 +23,7 @@ enum class DiagnosticStep(val title: String) {
     COMPLETE("Backup pass complete"), SCHEDULE_REGISTER("Scheduler registration"), SCHEDULE_START("Scheduled backup started"),
     SCHEDULE_STOP("Scheduled backup stopped"), SCHEDULE_SKIP("Scheduled backup skipped")
 }
-enum class DiagnosticComponent { UPDATER, BACKUP, SCHEDULER, LIBRARY }
+enum class DiagnosticComponent { UPDATER, BACKUP, SCHEDULER, LIBRARY, CLEANUP }
 enum class DiagnosticReason { NONE, NETWORK, HTTP, METADATA, SIZE, HASH, PACKAGE, VERSION, SDK, SIGNATURE, STORAGE, INSTALLER, AUTHORIZATION, OTHER, OWNER_BUSY, SERVICE_OWNER_BUSY, JOB_OWNER_BUSY, POLICY, NO_REQUEST, SYSTEM_STOP }
 
 /** Names are accepted only as semantic release versions; never redact arbitrary input into a log. */

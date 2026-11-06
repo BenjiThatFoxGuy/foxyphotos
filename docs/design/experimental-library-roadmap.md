@@ -95,6 +95,26 @@ Both actions first copy: explicit source selection, bounded queue/staging, progr
 
 ## 3. Verified local cleanup
 
+Implementation in progress (2026-11-06): default-off native cleanup screen in Settings,
+independent device-local whitelist, durable new-upload receipts and explicit later-run
+actual Google `=d` byte-stream verification. A usable per-item Android 11+ write-consent
+then trash path re-downloads and rechecks policy/content/identity after system consent.
+No permanent delete or cloud delete. Original unredacted permission is required;
+old receipts/presence checks cannot qualify. 20 candidates/preview, 256 MiB/item,
+30-day upload evidence, 10-minute session verification; Android 10 cleanup disabled.
+See [protocol evidence, exact safety model and limitations](../research/google-original-cleanup.md).
+Google photo location removal and video thumbnail/transcode semantics can prevent
+byte equality; those items stay local. Live original download/device acceptance
+remains unverified. CI/artifact evidence follows below; do not mark this milestone
+accepted from compilation or fixture success alone.
+
+User steps: Settings → Experimental verified local cleanup → enable → allow original
+media access → choose cleanup folders → back up **new** items normally → return and
+Verify earlier uploads → review a matching item → Move local item to trash → confirm
+in app and approve Android write access. FoxyPhotos repeats remote/local verification
+before trashing. Use your device gallery to restore before device trash expires.
+
+
 Separate global opt-in and device-local folder whitelist, both off/empty by default. Backup-folder selection does not grant deletion authorization. Only items successfully uploaded in an earlier run become verification candidates in a later run. Example: upload photo A in run 1; in run 2 fetch the actual corresponding remote media bytes and compare a content hash with current local bytes. Upload success, existence lookup, thumbnail, remote metadata, filename or provider hash claim alone is insufficient.
 
 Cleanup requires a byte-for-byte content hash match from an actual remote download plus unchanged local identity/content and current whitelist authorization at deletion time. If Google serves a transformed representation, exact verification is unavailable: retain local file and explain safely. No deletion for uncertain, failed, unavailable, changed, excluded or unverifiable items. Preserve media permissions and use Android's required user-mediated deletion/trash flows for media the app cannot delete silently. Explain this platform limit instead of claiming automatic cleanup universally works.

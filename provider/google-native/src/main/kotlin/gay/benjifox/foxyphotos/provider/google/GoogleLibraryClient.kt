@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 class GoogleLibraryClient(
     private val credential: suspend () -> GoogleCredential,
     private val auth: GoogleAuthClient = GoogleAuthClient(),
-) : ReadOnlyLibrary {
+) : ReadOnlyLibrary, RemoteOriginalReader {
     private val http = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .callTimeout(30, TimeUnit.SECONDS).build()
 
@@ -33,6 +33,42 @@ class GoogleLibraryClient(
         val url = "https://lh3.googleusercontent.com/".toHttpUrl().newBuilder()
             .addPathSegment("p").addPathSegment(id + suffix).build()
         return fetch(authenticated(url.toString()).get().build(), if (large) 8 * 1024 * 1024 else 2 * 1024 * 1024)
+    }
+
+    /** Actual download stream, never a rendition/metadata hash. Equality is decided by caller. */
+    override suspend fun originalHash(id: String, expectedSize: Long): String {
+        require(id.isNotBlank() && id.length <= 4096)
+        require(expectedSize in 1..(256L * 1024 * 1024))
+        val url = "https://lh3.googleusercontent.com/".toHttpUrl().newBuilder()
+            .addPathSegment("p").addPathSegment(id + "=d").build()
+        return http.newCall(authenticated(url.toString()).get().build()).consumeCancellable { response ->
+            hashOriginalResponse(response, expectedSize)
+        }
+    }
+
+    private fun hashOriginalResponse(response: okhttp3.Response, expectedSize: Long): String {
+        require(expectedSize in 1..(256L * 1024 * 1024))
+            if (response.code == 401 || response.code == 403) {
+                auth.clearCachedSession()
+                throw GoogleAuthenticationException("Reconnect Google Photos in Settings.")
+            }
+            check(response.code == 200) { "Original unavailable" }
+            val body = response.body ?: error("Original unavailable")
+            check(body.contentLength() == -1L || body.contentLength() == expectedSize) { "Original size differs" }
+            return body.byteStream().use { input ->
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                val buffer = ByteArray(32 * 1024)
+                var count = 0L
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    count += n
+                    check(count <= expectedSize) { "Original size differs" }
+                    digest.update(buffer, 0, n)
+                }
+                check(count == expectedSize) { "Original size differs" }
+                digest.digest().joinToString("") { "%02x".format(it) }
+            }
     }
 
     private suspend fun authenticated(url: String): Request.Builder = Request.Builder().url(url)
