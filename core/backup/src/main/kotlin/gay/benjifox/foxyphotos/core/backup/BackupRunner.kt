@@ -23,6 +23,7 @@ data class BackupRunResult(val counts: BackupCounts, val paused: Boolean = false
 }
 
 sealed interface BackupItemOutcome {
+    data object Deferred : BackupItemOutcome
     data object Uncertain : BackupItemOutcome
     data object Failed : BackupItemOutcome
 }
@@ -57,6 +58,7 @@ suspend fun <Item, Hash> runBackup(
                         counts = if (result.alreadyPresent) counts.copy(alreadyPresent = counts.alreadyPresent + 1)
                         else counts.copy(uploaded = counts.uploaded + 1)
                     }
+                    BackupItemOutcome.Deferred -> return BackupRunResult(counts, paused = true, waiting = true)
                     BackupItemOutcome.Uncertain -> counts = counts.copy(uncertain = counts.uncertain + 1)
                     BackupItemOutcome.Failed -> counts = counts.copy(failed = counts.failed + 1)
                 }

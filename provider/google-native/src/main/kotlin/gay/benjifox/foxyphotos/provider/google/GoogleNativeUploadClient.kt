@@ -80,6 +80,7 @@ class GoogleNativeUploadClient internal constructor(
         authorization: String,
         trace: UploadDiagnosticTrace,
     ): GoogleCommitToken = retrySideEffectingRequest(trace, UploadStage.MEDIA_BYTES) { attempt ->
+        if (!request.beforeBytes()) throw GoogleUploadDeferredException()
         val url = "${GoogleNativeProtocol.uploadEndpoint}?upload_id=$uploadToken"
         val byteRequest = Request.Builder()
             .url(url)
@@ -220,6 +221,7 @@ data class GoogleUploadRequest(
     val sha1: ByteArray,
     val openSource: () -> InputStream,
     val fileType: UploadFileType = UploadFileType.OTHER,
+    val beforeBytes: suspend () -> Boolean = { true },
 )
 
 sealed interface GoogleUploadOutcome {
@@ -245,6 +247,8 @@ private class StreamingRequestBody(
         }
     }
 }
+
+class GoogleUploadDeferredException : IllegalStateException("Waiting for backup conditions")
 
 class GoogleUploadException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
 

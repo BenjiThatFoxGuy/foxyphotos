@@ -62,6 +62,25 @@ class GoogleUploadDiagnosticsTest {
         assertFalse(events.joinToString { it.render() }.contains("private"))
     }
 
+    @Test fun `late policy gate prevents first bytes and every retry`() = runBlocking {
+        for (allowFirst in listOf(false, true)) {
+            var puts = 0
+            var gates = 0
+            val http = OkHttpClient.Builder().addInterceptor { chain ->
+                if (chain.request().method == "PUT") { puts++; throw java.io.IOException("offline") }
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).message("ok").code(200)
+                    .header("X-GUploader-UploadID", "test-token").body(byteArrayOf().toResponseBody()).build()
+            }.build()
+            val client = GoogleNativeUploadClient(UploadDiagnosticSink {}, http, { "test-auth" }, {})
+            try {
+                client.upload(request().copy(beforeBytes = { gates++; allowFirst && gates == 1 }))
+                fail("must wait")
+            } catch (_: GoogleUploadDeferredException) { }
+            assertEquals(if (allowFirst) 1 else 0, puts)
+            assertEquals(if (allowFirst) 2 else 1, gates)
+        }
+    }
+
     private fun request() = GoogleUploadRequest(GoogleCredential("private@example.com", "private-id", emptyList()),
         "/DCIM/private.jpg", 42, 0, ByteArray(20) { 123 }, { ByteArrayInputStream(byteArrayOf(1)) }, UploadFileType.JPEG)
 

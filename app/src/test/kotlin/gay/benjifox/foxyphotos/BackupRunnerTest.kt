@@ -11,6 +11,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BackupRunnerTest {
+    @Test fun `late provider refusal waits preserving confirmed outcomes`() = runBlocking {
+        val ledger = mutableListOf<Int>()
+        val result = runBackup(listOf(1, 2, 3), { it }, { false },
+            { item, _ -> if (item == 2) throw gay.benjifox.foxyphotos.provider.google.GoogleUploadDeferredException() else BackupUploadResult("key") },
+            { item, _ -> ledger += item })
+        assertTrue(result.paused)
+        assertTrue(result.waiting)
+        assertEquals(BackupCounts(uploaded = 1), result.counts)
+        assertEquals(listOf(1), ledger)
+    }
+
     @Test fun `cancelled job stops between items even when callbacks do not suspend`() = runBlocking {
         val visited = mutableListOf<Int>()
         val recorded = mutableListOf<Int>()

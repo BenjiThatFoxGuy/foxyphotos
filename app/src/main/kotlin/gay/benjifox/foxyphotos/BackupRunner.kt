@@ -23,6 +23,7 @@ internal suspend fun <Item, Hash> runBackup(
     items, hash, isCommitted,
     upload = { item, hashed ->
         try { upload(item, hashed) }
+        catch (_: gay.benjifox.foxyphotos.provider.google.GoogleUploadDeferredException) { BackupItemOutcome.Deferred }
         catch (_: GoogleUploadUncertainException) { BackupItemOutcome.Uncertain }
     },
     recordCommitted, shouldPause, onProgress,

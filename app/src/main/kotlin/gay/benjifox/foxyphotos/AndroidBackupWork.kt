@@ -52,6 +52,7 @@ internal class AndroidBackupWork(private val context: Context) {
                         modifiedEpochSeconds = item.modifiedEpochSeconds,
                         sha1 = hashed.sha1,
                         fileType = fileType,
+                        beforeBytes = { !shouldPause() && policy.reasons(item.uri.toString()).isEmpty() },
                         openSource = { context.contentResolver.openInputStream(item.uri) ?: throw IllegalStateException("Media unavailable") },
                     ))) {
                         is GoogleUploadOutcome.Committed -> BackupUploadResult(outcome.mediaKey)
