@@ -129,13 +129,13 @@ class GoogleUploadDiagnosticsTest {
         try {
             client.upload(request)
             fail("missing key must still fail")
-        } catch (_: GoogleProtocolException) { }
+        } catch (_: GoogleUploadUncertainException) { }
         assertEquals(2, commits)
         assertEquals(1, events.map { it.correlationId.toString() }.distinct().size)
         assertTrue(events.any { it.stage == UploadStage.COMMIT && it.httpStatus == 503 && it.attempt == 1 })
         assertTrue(events.any { it.stage == UploadStage.COMMIT && it.action == UploadAction.RETRY && it.attempt == 1 })
         assertTrue(events.any { it.stage == UploadStage.COMMIT && it.responseShape?.encoded == "1:2:0[]" && it.attempt == 2 })
-        assertTrue(events.any { it.stage == UploadStage.COMMIT && it.failure == UploadFailure.PROTOCOL && it.attempt == 2 })
+        assertTrue(events.any { it.stage == UploadStage.COMMIT && it.failure == UploadFailure.UNCERTAIN && it.attempt == 2 })
         assertEquals(UploadAction.FAILURE, events.last().action)
         val text = events.joinToString { it.render() }
         listOf("secret", "private", "DCIM", "example.com").forEach { assertFalse(text.contains(it)) }
