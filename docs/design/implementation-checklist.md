@@ -4,14 +4,16 @@ Keep this checklist alongside gallery-behavior.md and backup-policy.md. User-app
 
 ## First: native gallery, modes and Settings
 
-- [ ] Verify and finish real local photo/video grid, date sections, responsive thumbnails and tap-to-view/paging.
-- [ ] Fix review findings: consistent selected-media permission checks across lifecycle; cancellable MediaStore query and thumbnail I/O.
-- [ ] Modern / Simple mode choice in wizard and persisted Settings switch; existing installs retain Simple until changed.
-- [ ] Corner Settings cog in either mode. Settings owns logs, rerun setup, account connection and backup-folder selection.
-- [ ] Main screen hides account email behind explicit profile/avatar tap.
-- [ ] Folder list refreshes on every entry; no Refresh folders button. Explicit empty selection remains empty.
-- [ ] Preserve Simple manual-start background backup and pause/cancel. Navigation never starts a run.
-- [ ] Independent review and full build/test verification before marking this slice complete.
+Implementation commit: `09ff19e`. Parent verification: full check, debug assembly and lint passed; 84 tests, zero failures/errors/skips. Independent review passed after fixing selected-media lifecycle handling and cancellable provider I/O. No physical-device visual smoke test or live-media interoperability claim. Local commits only, not yet pushed.
+
+- [x] Verify and finish real local photo/video grid, date sections, responsive thumbnails and tap-to-view/paging.
+- [x] Fix review findings: consistent selected-media permission checks across lifecycle; cancellable MediaStore query and thumbnail I/O.
+- [x] Modern / Simple mode choice in wizard and persisted Settings switch; existing installs retain Simple until changed.
+- [x] Corner Settings cog in either mode. Settings owns logs, rerun setup, account connection and backup-folder selection.
+- [x] Main screen hides account email behind explicit profile/avatar tap.
+- [x] Folder list refreshes on every entry; no Refresh folders button. Explicit empty selection remains empty.
+- [x] Preserve Simple manual-start background backup and pause/cancel. Navigation never starts a run.
+- [x] Independent review and full build/test verification before marking this slice complete.
 
 ## Next: gallery backup actions
 
