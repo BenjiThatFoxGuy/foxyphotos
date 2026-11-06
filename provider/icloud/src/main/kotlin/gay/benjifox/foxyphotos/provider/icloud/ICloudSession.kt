@@ -90,7 +90,7 @@ class ICloudSessionRepository internal constructor(
         val bytes = session.encode()
         try { store.saveCredential(reference, bytes) } finally { bytes.fill(0) }
     }
-    @JvmSynthetic suspend fun import(config: String, section: String) {
+    @JvmSynthetic suspend fun importSession(config: String, section: String) {
         val candidate = ICloudSessionImport.parse(config, section)
         save(validateCandidate(candidate))
     }

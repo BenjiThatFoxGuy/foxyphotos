@@ -218,7 +218,7 @@ class ICloudLibraryClient internal constructor(
             LibraryItem(key, (value(asset,"assetDate") as? Number)?.toLong() ?: 0L, value(master,"resVidFullRes") != null)
         }
         if (resources.size > 5000 || masters.size > 5000) throw IOException("iCloud session item limit reached.")
-        LibraryPage(items, if (assets.isEmpty()) null else (offset + assets.size).toString())
+        return LibraryPage(items, if (assets.isEmpty()) null else (offset + assets.size).toString())
     }
     private fun filter(name: String, type: String, value: Any) = JSONObject().put("fieldName", name).put("comparator", "EQUALS")
         .put("fieldValue", JSONObject().put("type", type).put("value", value))

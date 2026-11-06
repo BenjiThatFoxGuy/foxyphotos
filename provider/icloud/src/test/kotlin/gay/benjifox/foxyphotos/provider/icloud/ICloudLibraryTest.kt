@@ -7,8 +7,6 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
 import java.util.Base64
-import javax.crypto.Cipher
-import javax.crypto.spec.*
 
 class ICloudLibraryTest {
     private val config = """
@@ -40,13 +38,10 @@ class ICloudLibraryTest {
         try { ICloudSessionImport.parse(config, "missing"); fail() } catch (_: IllegalArgumentException) { }
     }
     @Test fun `rclone obscure uses URL base64 IV and AES CTR without plaintext guessing`() {
-        // Deterministic interoperability vector using the public rclone obscure key and a fixed fixture IV.
-        val key = "9c935b48730a554d6bfd7c63c886a92bd390198eb8128afbf4de162b8b95f638".chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val iv = ByteArray(16) { it.toByte() }
-        val cipher = Cipher.getInstance("AES/CTR/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key,"AES"), IvParameterSpec(iv))
-        val obscured = Base64.getUrlEncoder().withoutPadding().encodeToString(iv + cipher.doFinal("fixture-password".encodeToByteArray()))
-        assertEquals("fixture-password", ICloudSessionImport.parse(config + "\npassword = " + obscured, "photos").fields["password"])
+        // Fixed interoperability vectors from pinned rclone obscure_test.go.
+        listOf("YWFhYWFhYWFhYWFhYWFhYXMaGgIlEQ", "YmJiYmJiYmJiYmJiYmJiYp3gcEWbAw").forEach { obscured ->
+            assertEquals("potato", ICloudSessionImport.parse(config + "\npassword = " + obscured, "photos").fields["password"])
+        }
         try { ICloudSessionImport.parse(config + "\npassword = plaintext", "photos"); fail() } catch (_: IllegalArgumentException) { }
     }
     @Test fun `rejected replacement keeps prior encrypted-store payload`() = runBlocking {
@@ -58,10 +53,10 @@ class ICloudLibraryTest {
             override suspend fun deleteCredential(reference: CredentialReference) { fail("Must not delete") }
         }
         val rejected = ICloudSessionRepository(store) { throw ICloudReauthenticationRequired() }
-        try { rejected.import(config,"photos"); fail() } catch (_: ICloudReauthenticationRequired) { }
+        try { rejected.importSession(config,"photos"); fail() } catch (_: ICloudReauthenticationRequired) { }
         assertEquals("previous-session", stored.decodeToString())
         val accepted = ICloudSessionRepository(store) { it.replacingCookies("updated=fixture;") }
-        accepted.import(config,"photos")
+        accepted.importSession(config,"photos")
         assertEquals("updated=fixture;", accepted.load()!!.cookies())
         assertFalse(stored.decodeToString().contains("unrelated"))
     }

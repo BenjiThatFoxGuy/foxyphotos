@@ -32,7 +32,7 @@ internal fun ICloudSessionSetup() {
                     withContext(Dispatchers.IO) {
                         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytesBounded(256 * 1024) }
                             ?: throw IllegalArgumentException()
-                        try { repository.import(bytes.decodeToString(throwOnInvalidSequence = true), section.trim()) }
+                        try { repository.importSession(bytes.decodeToString(throwOnInvalidSequence = true), section.trim()) }
                         finally { bytes.fill(0) }
                     }
                     status = "Session validated and stored encrypted. Reopen the iCloud library to use it."
@@ -154,9 +154,9 @@ internal fun ICloudLibraryControls(state: ICloudSourceState) {
     }
     Text(status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
     Row {
-        TextButton(enabled = client != null && !busy && !expired && !ended && pages < 10, onClick = { load() }) { Text("Load iCloud page") }
-        TextButton(enabled = client != null && !busy && !expired, onClick = { if (albumPages == 0) loadAlbums() else showAlbums = true }) { Text("iCloud albums") }
-        TextButton(enabled = client != null && !busy && !expired, onClick = {
+        TextButton(modifier = Modifier.weight(1f), enabled = client != null && !busy && !expired && !ended && pages < 10, onClick = { load() }) { Text("Load iCloud page") }
+        TextButton(modifier = Modifier.weight(1f), enabled = client != null && !busy && !expired, onClick = { if (albumPages == 0) loadAlbums() else showAlbums = true }) { Text("iCloud albums") }
+        TextButton(modifier = Modifier.weight(1f), enabled = client != null && !busy && !expired, onClick = {
             state.items = emptyList(); cursor = null; pages = 0; ended = false
             state.preview?.cache?.evictAll(); load()
         }) { Text("Refresh iCloud") }

@@ -6,6 +6,8 @@ import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.material3.*
@@ -152,6 +154,7 @@ internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = 
             .sortedWith(compareByDescending<CombinedItem> { it.time }.thenBy { it.key })
     }
     Column(Modifier.fillMaxSize()) {
+        Column(if (includeICloud) Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()) else Modifier) {
         Text(if (includeICloud) "Experimental · Local + Google + iCloud" else "Experimental · Local + Google Photos", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.titleMedium)
         Text(localStatus, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
         Text("${locals.size} local · ${remotes.size} Google loaded. Sources stay separate; Google listing may be partial.",
@@ -169,6 +172,7 @@ internal fun CombinedLibrary(onPermission: () -> Unit, includeICloud: Boolean = 
         else if (!stopped) TextButton(onClick = { load() }) { Text(if (error != null) "Retry Google page" else "Load next Google page") }
         else if (error == null) Text("Google listing ended for this session.", Modifier.padding(horizontal = 12.dp))
         if (includeICloud) ICloudLibraryControls(cloud)
+        }
         LazyVerticalGrid(GridCells.Adaptive(100.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(entries, key = { it.key }) { item ->
                 Box(Modifier.aspectRatio(1f).clickable { selected = item }) {
