@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import gay.benjifox.foxyphotos.core.model.*
 import gay.benjifox.foxyphotos.core.security.AndroidKeystoreCredentialStore
+import gay.benjifox.foxyphotos.provider.contract.CredentialReference
 import gay.benjifox.foxyphotos.provider.icloud.*
 import kotlinx.coroutines.*
 
