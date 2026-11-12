@@ -1,12 +1,13 @@
 import SwiftUI
 // FoxyPhotosPlatform is the Kotlin/Native framework Gradle builds from
-// core/platform. Its file facade class is `FoxyPhotosPlatformKt`.
+// core/platform. PlatformInfo is the Kotlin `object` that exposes the shared
+// core to Swift as PlatformInfo.shared.
 import FoxyPhotosPlatform
 
 struct ContentView: View {
     // Rendered by the shared Kotlin core, not by Swift: this line is the proof
     // that core/platform actually links and runs on iOS.
-    private let coreStamp = FoxyPhotosPlatformKt.formatCurrentTimeIso()
+    private let coreStamp = PlatformInfo.shared.currentTimeIso()
 
     var body: some View {
         VStack(spacing: 16) {
