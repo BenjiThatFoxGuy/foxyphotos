@@ -1,5 +1,6 @@
 package gay.benjifox.foxyphotos.core.platform
 
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -33,6 +34,22 @@ class PlatformPrimitivesTest {
     }
 
     @Test
+    fun digestMatchesKnownAnswerVectors() {
+        assertEquals(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            Sha256Digest().digestHex(),
+        )
+        assertEquals(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            Sha256Digest().apply { update("abc".toByteArray(), 0, 3) }.digestHex(),
+        )
+        assertEquals(
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+            Sha256Digest().apply { update("hello world".toByteArray(), 0, 11) }.digestHex(),
+        )
+    }
+
+    @Test
     fun digestMatchesMessageDigest() {
         val data = ByteArray(1_000_003) { (it % 251).toByte() }
         val expected = java.security.MessageDigest.getInstance("SHA-256").digest(data)
@@ -47,6 +64,47 @@ class PlatformPrimitivesTest {
                 offset += chunk
             }
             assertEquals(expected, digest.digestHex())
+        } finally {
+            digest.close()
+        }
+    }
+
+    @Test
+    fun digestMatchesMessageDigestAroundBlockBoundaries() {
+        // Every length where the padding could land inside or just past a block.
+        for (length in intArrayOf(0, 1, 55, 56, 57, 63, 64, 65, 119, 120, 127, 128, 129, 192)) {
+            val data = ByteArray(length) { (it * 31 + 7).toByte() }
+            val expected = java.security.MessageDigest.getInstance("SHA-256").digest(data)
+                .joinToString("") { it.toInt().and(0xFF).toString(16).padStart(2, '0') }
+            val digest = Sha256Digest()
+            try {
+                digest.update(data, 0, length)
+                assertEquals("length $length", expected, digest.digestHex())
+            } finally {
+                digest.close()
+            }
+        }
+    }
+
+    @Test
+    fun digestHexIsRepeatable() {
+        val digest = Sha256Digest()
+        try {
+            digest.update("hello world".toByteArray(), 0, 11)
+            val first = digest.digestHex()
+            assertEquals(first, digest.digestHex())
+        } finally {
+            digest.close()
+        }
+    }
+
+    @Test
+    fun updateRejectsOutOfRangeReads() {
+        val digest = Sha256Digest()
+        try {
+            assertThrows(IllegalArgumentException::class.java) { digest.update(ByteArray(4), 0, 5) }
+            assertThrows(IllegalArgumentException::class.java) { digest.update(ByteArray(4), -1, 2) }
+            assertThrows(IllegalArgumentException::class.java) { digest.update(ByteArray(4), 0, -1) }
         } finally {
             digest.close()
         }

@@ -20,12 +20,16 @@ guarded or the Android build breaks.
 
 The portable modules become Kotlin Multiplatform modules.
 
-- `core:platform` (new) - expect/actual seam for wall-clock time, ISO-8601
-  rendering and SHA-256.
+- `core:platform` (new) - the only expect/actual seam left is wall-clock time.
+  ISO-8601 rendering and SHA-256 are pure Kotlin in `commonMain`, so every target
+  gets byte-identical output and the JVM can prove the digest against
+  `java.security.MessageDigest`.
 - `core:model` - depends on `core:platform`.
 - `core:backup` - depends on `core:model` and `core:platform`.
-- `provider:contract` and `provider:foundation` - converted; their value classes
-  keep `@JvmInline`, which the common stdlib exposes as an optional expectation.
+- `provider:contract` and `provider:foundation` - converted. `CredentialReference`
+  and `HttpStatus` became plain data classes: `@JvmInline` is absent from the
+  common standard library, so value classes cannot be declared in shared code and
+  still compile for every target.
 
 Each declares `jvm()` unconditionally, plus `iosSimulatorArm64()` and
 `iosArm64()` only when the host is macOS. There is deliberately no

@@ -23,5 +23,11 @@ data class ProviderError(
     val isPermanent: Boolean,
 )
 
-@JvmInline
-value class HttpStatus(val value: Int)
+/**
+ * HTTP status code.
+ *
+ * A plain data class rather than a value class: `@JvmInline` is absent from the
+ * common standard library, so value classes cannot be declared in shared code
+ * and still compile for every target.
+ */
+data class HttpStatus(val value: Int)
