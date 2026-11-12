@@ -47,6 +47,9 @@ jobs:
           cd iosApp
           xcodegen generate
 
+      # generic/platform=iOS Simulator with ONLY_ACTIVE_ARCH=YES builds the slice
+      # the runner itself can run (arm64 on macos-latest), which is the slice the
+      # Gradle-built Kotlin frameworks above target.
       - name: Build iOS app
         run: |
           xcodebuild \
@@ -55,4 +58,5 @@ jobs:
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath iosApp/build/DerivedData \
+            ONLY_ACTIVE_ARCH=YES \
             build
