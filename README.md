@@ -41,7 +41,7 @@ Starting a backup launches an Android `dataSync` foreground service. Leaving the
 
 Android 10-15 use an ordinary progress notification. Android 16 and later request Live Update promotion on that same notification, using native progress styling and compact status text. Promotion depends on system eligibility and user settings. Notification permission denial does not prevent backup; controls remain available in the app.
 
-The service is not automatically restarted after process death or force-stop. Android's foreground-service time limits still apply. Backup session state and orchestration live in `core:backup`, with Android lifecycle, storage, and provider adapters in platform code. The core is currently a Kotlin/JVM module; an iOS target has not yet been configured or verified.
+The service is not automatically restarted after process death or force-stop. Android's foreground-service time limits still apply. Backup session state and orchestration live in `core:backup`, with Android lifecycle, storage, and provider adapters in platform code. The portable modules (`core:platform`, `core:model`, `core:backup`, `provider:contract`, `provider:foundation`) are Kotlin Multiplatform and also compile for iOS; a SwiftUI shell lives in `iosApp/`. See [ADR 3](docs/adr/0003-kotlin-multiplatform-ios.md).
 
 ## Build and release pipeline
 
@@ -50,6 +50,7 @@ One GitHub Actions workflow (`.github/workflows/verify.yml`) owns the build coun
 - **Nightlies** (every push to `main`) build and test, then upload **both** a debug APK and a signed release APK as Actions artifacts.
 - **Releases** (tag push `v*`) build **only** the signed release APK from that tag's commit, attest it, then attach that exact APK to a draft GitHub Release. The publisher checks the uploaded SHA-256 before publishing, then checks the published asset and release immutability again. Build jobs have no release-write permission; only the tag-only publishing job does.
 - **Pull requests** build/test debug only, without release signing, attestations, or publishing. Manual runs validate builds without publishing.
+- **iOS** (`.github/workflows/ios.yml`) runs on a macOS runner: it compiles the shared Kotlin core for the iOS simulator and builds the SwiftUI shell in `iosApp/`. No local Mac is required.
 
 Versioning is derived, not hand-edited:
 

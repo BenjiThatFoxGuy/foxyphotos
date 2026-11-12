@@ -64,8 +64,9 @@ internal class CleanupStorage(private val context: Context) {
     suspend fun hash(local: CleanupLocal): String = withContext(Dispatchers.IO) {
         // Never verify a privacy-redacted ContentResolver rendition as the device original.
         val original = MediaStore.setRequireOriginal(local.uri)
-        context.contentResolver.openInputStream(original)?.use { VerifiedCleanup.hash(it, local.size) }
-            ?: error("Original unavailable")
+        context.contentResolver.openInputStream(original)?.use { input ->
+            VerifiedCleanup.hash(ByteReader { buffer -> input.read(buffer, 0, buffer.size) }, local.size)
+        } ?: error("Original unavailable")
     }
 
     suspend fun recheck(uri: Uri, verification: CleanupVerification): Boolean = withContext(Dispatchers.IO) {

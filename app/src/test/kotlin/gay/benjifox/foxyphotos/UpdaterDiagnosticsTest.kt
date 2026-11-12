@@ -2,6 +2,7 @@ package gay.benjifox.foxyphotos
 
 import android.content.Context
 import gay.benjifox.foxyphotos.core.model.*
+import gay.benjifox.foxyphotos.core.updater.ReleaseUpdate
 import kotlinx.coroutines.runBlocking
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType

@@ -9,8 +9,8 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import gay.benjifox.foxyphotos.core.model.*
 import gay.benjifox.foxyphotos.core.model.DiagnosticStep.*
-import gay.benjifox.foxyphotos.core.model.ReleaseUpdate
-import gay.benjifox.foxyphotos.core.model.ReleaseVerification
+import gay.benjifox.foxyphotos.core.updater.ReleaseUpdate
+import gay.benjifox.foxyphotos.core.updater.ReleaseVerification
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest

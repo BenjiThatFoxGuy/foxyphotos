@@ -18,7 +18,9 @@ rootProject.name = "FoxyPhotos"
 
 include(
     ":app",
+    ":core:platform",
     ":core:model",
+    ":core:updater",
     ":core:database",
     ":core:media",
     ":core:backup",
