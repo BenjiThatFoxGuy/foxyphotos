@@ -47,7 +47,7 @@ class Sha256Digest {
         var remaining = count
         if (buffered > 0) {
             val take = minOf(BLOCK_BYTES - buffered, remaining)
-            System.arraycopy(data, index, buffer, buffered, take)
+            data.copyInto(buffer, buffered, index, index + take)
             buffered += take
             index += take
             remaining -= take
@@ -62,7 +62,7 @@ class Sha256Digest {
             remaining -= BLOCK_BYTES
         }
         if (remaining > 0) {
-            System.arraycopy(data, index, buffer, 0, remaining)
+            data.copyInto(buffer, 0, index, index + remaining)
             buffered = remaining
         }
     }
@@ -81,8 +81,8 @@ class Sha256Digest {
         // Merge into a scratch buffer: the digest keeps its buffered bytes so the
         // digest can be read more than once and followed by more data.
         val padded = ByteArray(buffered + tail.size)
-        if (buffered > 0) System.arraycopy(buffer, 0, padded, 0, buffered)
-        System.arraycopy(tail, 0, padded, buffered, tail.size)
+        if (buffered > 0) buffer.copyInto(padded, 0, 0, buffered)
+        tail.copyInto(padded, buffered)
         for (offset in padded.indices step BLOCK_BYTES) {
             compressInto(finalized, padded, offset)
         }
