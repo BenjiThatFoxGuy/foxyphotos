@@ -1,0 +1,58 @@
+name: Verify iOS build
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-ios:
+    name: Build shared core and iOS shell
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      # Kotlin/Native compiles the shared core straight to a static framework for
+      # the iOS simulator. This is the step that proves the portable modules have
+      # no JVM-only dependencies.
+      - name: Build shared core for iOS simulator
+        run: |
+          ./gradlew \
+            :core:platform:linkDebugFrameworkIosSimulatorArm64 \
+            :core:model:linkDebugFrameworkIosSimulatorArm64 \
+            :core:backup:linkDebugFrameworkIosSimulatorArm64 \
+            :provider:contract:linkDebugFrameworkIosSimulatorArm64 \
+            :provider:foundation:linkDebugFrameworkIosSimulatorArm64 \
+            --stacktrace
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          cd iosApp
+          xcodegen generate
+
+      - name: Build iOS app
+        run: |
+          xcodebuild \
+            -project iosApp/FoxyPhotos.xcodeproj \
+            -scheme FoxyPhotos \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath iosApp/build/DerivedData \
+            build

@@ -1,0 +1,52 @@
+name: FoxyPhotos
+options:
+  bundleIdPrefix: gay.benjifox
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+targets:
+  FoxyPhotos:
+    type: application
+    platform: iOS
+    sources:
+      - path: iosApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: gay.benjifox.foxyphotos
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "FoxyPhotos backs up the photos and videos you choose to a provider you own."
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "FoxyPhotos restores your backups to the photo library you chose."
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      # Shared Kotlin core, built by Gradle into each module's build/bin directory.
+      - framework: ../core/platform/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosPlatform.framework
+        embedType: embed
+      - framework: ../core/model/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosModel.framework
+        embedType: embed
+      - framework: ../core/backup/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosBackup.framework
+        embedType: embed
+      - framework: ../provider/contract/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosContract.framework
+        embedType: embed
+      - framework: ../provider/foundation/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosFoundation.framework
+        embedType: embed
+
+schemes:
+  FoxyPhotos:
+    build:
+      targets:
+        FoxyPhotos: all
+    run:
+      config: Debug
