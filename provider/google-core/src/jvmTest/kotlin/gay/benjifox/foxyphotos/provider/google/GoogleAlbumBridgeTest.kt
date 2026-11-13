@@ -34,11 +34,11 @@ class GoogleAlbumBridgeTest {
             response(bytes(1, text(1, "created-id"))),
             response("Auth=bearer\n".encodeToByteArray()), response(byteArrayOf())))
         val bridge = GoogleAlbumBridge(fake)
-        assertEquals("created-id", bridge.create(credential, "Camera Roll", 123L))
+        assertEquals("created-id", bridge.create(credential, "Camera Roll", "media-id", 123L))
         bridge.add(credential, "created-id", "media-id", 124L)
         val creation = GoogleNativeProtocol.ProtoFields(Base64.getDecoder().decode(fake.requests[1].bodyBase64))
         assertEquals("Camera Roll", creation.string(1))
-        assertTrue(creation.messages(4).isEmpty())
+        assertFalse(creation.messages(4).isEmpty())
         val add = GoogleNativeProtocol.ProtoFields(Base64.getDecoder().decode(fake.requests[3].bodyBase64))
         assertEquals("media-id", add.string(1))
         assertEquals("created-id", add.string(2))

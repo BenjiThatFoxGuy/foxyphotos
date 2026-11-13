@@ -284,7 +284,7 @@ struct ContentView: View {
                 backupProgress = 1
                 backupStatus = "\(result.confirmed) confirmed, \(result.skipped) already backed up, \(result.failed) failed."
                 if result.albumRequests > 0 {
-                    backupStatus! += " \(result.albumRequests) album requests accepted; membership not remotely verified."
+                    backupStatus! += " \(result.albumRequests) album placements acknowledged, not remotely verified."
                 }
                 if result.albumUnresolved > 0 {
                     backupStatus! += " \(result.albumUnresolved) album placements need review; uncertain writes won't auto-replay."

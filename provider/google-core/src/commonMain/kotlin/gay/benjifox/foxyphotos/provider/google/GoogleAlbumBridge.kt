@@ -27,10 +27,11 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     }
 
     @Throws(Exception::class)
-    suspend fun create(credentialForm: String, title: String, nowSeconds: Long): String {
-        require(title.isNotBlank() && title.length <= 500)
-        // No initial member. Creation and membership are separately journaled writes.
-        val response = post(credentialForm, createEndpoint, GoogleAlbumProtocol.create(title, nowSeconds))
+    suspend fun create(credentialForm: String, title: String, initialMediaKey: String, nowSeconds: Long): String {
+        require(title.isNotBlank() && title.length <= 500 && initialMediaKey.isNotBlank())
+        // Use the same create-with-first-member protocol as Android.
+        val response = post(credentialForm, createEndpoint,
+                            GoogleAlbumProtocol.create(title, nowSeconds, initialMediaKey))
         return GoogleAlbumProtocol.createdId(response)
     }
 
