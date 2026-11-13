@@ -6,7 +6,8 @@ import UniformTypeIdentifiers
 
 /// Diagnostic only. The system picker does not grant PhotoKit album access by itself.
 struct PrivatePhotoPicker: UIViewControllerRepresentable {
-    let onReport: (String) -> Void
+    let inspectFiles: Bool
+    let onReport: (String, [String], Int) -> Void
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration(photoLibrary: .shared())
@@ -19,18 +20,24 @@ struct PrivatePhotoPicker: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
-    func makeCoordinator() -> Coordinator { Coordinator(onReport: onReport) }
+    func makeCoordinator() -> Coordinator { Coordinator(inspectFiles: inspectFiles, onReport: onReport) }
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        private let onReport: (String) -> Void
-        init(onReport: @escaping (String) -> Void) { self.onReport = onReport }
+        private let inspectFiles: Bool
+        private let onReport: (String, [String], Int) -> Void
+        init(inspectFiles: Bool, onReport: @escaping (String, [String], Int) -> Void) {
+            self.inspectFiles = inspectFiles
+            self.onReport = onReport
+        }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true)
-            guard !results.isEmpty else { onReport(""); return }
+            guard !results.isEmpty else { onReport("", [], 0); return }
             let group = DispatchGroup()
             let lock = NSLock()
             var entries: [(Int, String)] = []
+            var pickedIds: [String] = []
+            var inaccessible = 0
             for (index, result) in results.enumerated() {
                 let provider = result.itemProvider
                 let id = result.assetIdentifier
@@ -39,6 +46,7 @@ struct PrivatePhotoPicker: UIViewControllerRepresentable {
                                "Provider suggested name: \(provider.suggestedName ?? "not supplied")",
                                "Provider types: \(provider.registeredTypeIdentifiers.joined(separator: ", "))"]
                 if let id, let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject {
+                    pickedIds.append(id)
                     details += ["PhotoKit access: yes", "Media type: \(asset.mediaType == .image ? "image" : asset.mediaType == .video ? "video" : "other")",
                                 "Dimensions: \(asset.pixelWidth) × \(asset.pixelHeight)",
                                 "Duration: \(asset.duration) seconds", "Subtype flags: \(asset.mediaSubtypes.rawValue)",
@@ -59,7 +67,12 @@ struct PrivatePhotoPicker: UIViewControllerRepresentable {
                         details.append("User album: \(album.localizedTitle ?? "untitled") [\(album.localIdentifier)]")
                     }
                 } else {
+                    inaccessible += 1
                     details.append("PhotoKit access: no; source album, original filename and deletion eligibility cannot be verified")
+                }
+                if !inspectFiles {
+                    entries.append((index, details.joined(separator: "\n")))
+                    continue
                 }
                 // File representation is temporary. Inspect it inside the callback; never upload or retain it.
                 guard let type = provider.registeredTypeIdentifiers.first(where: {
@@ -84,9 +97,13 @@ struct PrivatePhotoPicker: UIViewControllerRepresentable {
                     group.leave()
                 }
             }
+            let prefix = inspectFiles
+                ? "Private picker diagnostic only. Nothing was uploaded or deleted."
+                : "Picker selection details. No file representation was used for backup."
             group.notify(queue: .main) { [onReport] in
-                onReport("Private picker diagnostic only. Nothing was uploaded or deleted.\n\n" +
-                         entries.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: "\n\n"))
+                onReport(prefix + "\n\n" +
+                         entries.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: "\n\n"),
+                         pickedIds, inaccessible)
             }
         }
     }

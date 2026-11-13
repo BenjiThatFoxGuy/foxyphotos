@@ -110,6 +110,7 @@ struct ContentView: View {
     @StateObject private var selection = PhotoSelection()
     @State private var importingCredential = false
     @State private var showingPrivatePicker = false
+    @State private var pickerForBackup = false
     @State private var pickerReport: String?
     @State private var credentialInput = ""
     @State private var credentialConfigured = GoogleCredentialStore.isConfigured
@@ -186,6 +187,11 @@ struct ContentView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                         Button("Back up selected albums") { startBackup() }
                             .disabled(isBackingUp || selection.isRefreshing || !credentialConfigured || selection.selected.isEmpty)
+                        Button("Back up a few picked photos") {
+                            pickerForBackup = true
+                            showingPrivatePicker = true
+                        }
+                        .disabled(isBackingUp || !credentialConfigured)
                         if isBackingUp {
                             ProgressView("Backing up… \(Int(backupProgress * 100))%", value: backupProgress, total: 1)
                                 .progressViewStyle(.linear)
@@ -197,7 +203,10 @@ struct ContentView: View {
                     }
                 }
                 Section("Private picker test") {
-                    Button("Inspect a few photos with iOS picker") { showingPrivatePicker = true }
+                    Button("Inspect a few photos with iOS picker") {
+                        pickerForBackup = false
+                        showingPrivatePicker = true
+                    }
                         .disabled(isBackingUp)
                     Text("Debug only. This does not upload or delete anything. The report shows which filenames and albums iOS actually exposes.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -223,9 +232,17 @@ struct ContentView: View {
                 credentialConfigured = GoogleCredentialStore.isConfigured
             }
             .sheet(isPresented: $showingPrivatePicker) {
-                PrivatePhotoPicker { report in
+                PrivatePhotoPicker(inspectFiles: !pickerForBackup) { report, ids, inaccessible in
+                    let backingUp = pickerForBackup
                     showingPrivatePicker = false
-                    if !report.isEmpty { pickerReport = report }
+                    pickerForBackup = false
+                    if backingUp {
+                        if inaccessible > 0 {
+                            backupStatus = "\(inaccessible) picked items aren't accessible through Photos. Nothing was backed up or deleted."
+                        } else if !ids.isEmpty {
+                            startBackup(pickedIds: ids)
+                        }
+                    } else if !report.isEmpty { pickerReport = report }
                 }
             }
             .sheet(isPresented: $importingCredential, onDismiss: {
@@ -279,8 +296,9 @@ struct ContentView: View {
         }
     }
 
-    @MainActor private func startBackup() {
-        guard !isBackingUp, credentialConfigured, selection.hasAccess, !selection.selected.isEmpty else { return }
+    @MainActor private func startBackup(pickedIds: [String]? = nil) {
+        guard !isBackingUp, credentialConfigured, selection.hasAccess,
+              pickedIds.map({ !$0.isEmpty }) ?? !selection.selected.isEmpty else { return }
         let session = IOSBackupSession()
         backupSession = session
         isBackingUp = true
@@ -293,7 +311,7 @@ struct ContentView: View {
         backupTask = Task {
             do {
                 let result = try await session.run(selected: chosen, albumNames: albumNames,
-                                                   deleteConfirmed: shouldDelete) { completed, total, failed in
+                                                   pickedIds: pickedIds, deleteConfirmed: shouldDelete) { completed, total, failed in
                     await MainActor.run {
                         backupProgress = total == 0 ? 1 : Double(completed) / Double(total)
                         backupStatus = "Checked \(completed) of \(total) · \(failed) failed"

@@ -60,6 +60,29 @@ private func selectedAssets(_ selected: Set<String>) -> [SelectedBackupAsset] {
     return assets
 }
 
+/// Picked IDs are resolved through PhotoKit, never through the picker's temporary rendition.
+private func pickedAssets(_ identifiers: [String]) throws -> ([SelectedBackupAsset], [String: String]) {
+    var assets: [SelectedBackupAsset] = []
+    var names: [String: String] = [:]
+    var seen: Set<String> = []
+    for id in identifiers where seen.insert(id).inserted {
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject,
+              asset.mediaType == .image || asset.mediaType == .video else { throw BackupFailure.noOriginal }
+        var albumIds: [String] = []
+        PHAssetCollection.fetchAssetCollectionsContaining(asset, with: .album, options: nil)
+            .enumerateObjects { album, _, _ in
+                albumIds.append(album.localIdentifier)
+                names[album.localIdentifier] = album.localizedTitle ?? "Album"
+            }
+        if albumIds.isEmpty {
+            albumIds = ["foxyphotos:camera-roll"]
+            names["foxyphotos:camera-roll"] = "Camera Roll"
+        }
+        assets.append(SelectedBackupAsset(asset: asset, albumIds: albumIds))
+    }
+    return (assets, names)
+}
+
 private func stage(_ asset: PHAsset) async throws -> StagedAsset {
     let resources = PHAssetResource.assetResources(for: asset)
     let wanted: [PHAssetResourceType] = asset.mediaType == .video
@@ -144,7 +167,8 @@ final class IOSBackupSession {
     private let transport = GoogleURLSessionTransport()
     func cancel() { transport.cancelActive() }
 
-    func run(selected: Set<String>, albumNames: [String: String], deleteConfirmed: Bool,
+    func run(selected: Set<String>, albumNames: [String: String], pickedIds: [String]? = nil,
+             deleteConfirmed: Bool,
              progress: @escaping (Int, Int, Int) async -> Void) async throws -> BackupResult {
         guard let credentialData = GoogleCredentialStore.load(),
               let credential = String(data: credentialData, encoding: .utf8) else {
@@ -158,8 +182,11 @@ final class IOSBackupSession {
         var remoteAlbums: [GoogleAlbum]?
         var albumListingLoaded = false
         var retriedAlbumList = false
-        let titleCounts = Dictionary(grouping: albumNames.values, by: { $0 }).mapValues(\.count)
-        let assets = await Task.detached(priority: .userInitiated) { selectedAssets(selected) }.value
+        let (assets, effectiveNames) = try await Task.detached(priority: .userInitiated) {
+            if let pickedIds { return try pickedAssets(pickedIds) }
+            return (selectedAssets(selected), albumNames)
+        }.value
+        let titleCounts = Dictionary(grouping: effectiveNames.values, by: { $0 }).mapValues(\.count)
         var confirmed = 0, skipped = 0, failed = 0, deletionIneligible = 0
         var albumRequests = 0, albumUnresolved = 0
         var albumIssues: [String: Int] = [:]
@@ -202,7 +229,7 @@ final class IOSBackupSession {
                     remoteAlbums = try? await albumBridge.list(credentialForm: credential)
                 }
                 for folder in selectedAsset.albumIds {
-                    guard let title = albumNames[folder] else {
+                    guard let title = effectiveNames[folder] else {
                         noteAlbumIssue("Source album name unavailable")
                         continue
                     }
