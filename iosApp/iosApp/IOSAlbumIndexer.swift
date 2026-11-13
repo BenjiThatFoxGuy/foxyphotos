@@ -1,15 +1,6 @@
 import Foundation
 import FoxyPhotosGoogleCore
 
-/// A mutable flag shared with a `Task` closure. Swift 6 rejects a captured
-/// mutable local in a `@Sendable` closure, so the flag lives in a reference type.
-private final class TimeoutFlag {
-    private let lock = NSLock()
-    private var fired = false
-    var didFire: Bool { lock.lock(); defer { lock.unlock() }; return fired }
-    func fire() { lock.lock(); fired = true; lock.unlock() }
-}
-
 /// Standalone, resumable Google album library refresh.
 ///
 /// Album listing is a long, multi-page job and Google can fail part-way through.
@@ -25,11 +16,13 @@ enum IOSAlbumIndexer {
     /// Refreshes the cached album library. The cached sync token makes this a
     /// delta refresh, so a repeat run only pulls what changed.
     ///
-    /// `timeLimit` bounds a user-visible refresh. A scheduled background pass
-    /// passes a larger limit and relies on the processing task's own expiry.
+    /// There is deliberately no whole-run bound, matching Android: a large
+    /// library is many pages, so the per-page bound is the stall guard. A
+    /// whole-run cap shorter than a legitimate listing kills it and masks the
+    /// real reason. A scheduled background pass is bounded by the processing
+    /// task's own expiry instead.
     static func refresh(progress: @escaping (String) async -> Void,
-                        showsUI: Bool = true,
-                        timeLimit: TimeInterval = 900) async throws -> Result {
+                        showsUI: Bool = true) async throws -> Result {
         guard let credentialData = GoogleCredentialStore.load(),
               let credential = String(data: credentialData, encoding: .utf8) else {
             throw BackupFailure.missingCredential
@@ -49,16 +42,7 @@ enum IOSAlbumIndexer {
             defer { background.finish() }
             AlbumIndexActivity.start(name: "Google album library")
         }
-        let timedOut = TimeoutFlag()
         do {
-            // Bounded, but generously: the transport's own request timeout is the
-            // backstop and this must not fire first on a legitimate slow listing.
-            let timeout = Task {
-                try? await Task.sleep(nanoseconds: UInt64(timeLimit * 1_000_000_000))
-                timedOut.fire()
-                transport.cancelActive()
-            }
-            defer { timeout.cancel() }
             let result = try await bridge.listDetailed(credentialForm: credential,
                                                        syncToken: cached?.syncToken,
                                                        onPage: { page, albumCount, _ in
@@ -88,9 +72,6 @@ enum IOSAlbumIndexer {
             return summary
         } catch {
             if showsUI { AlbumIndexActivity.end() }
-            // Only a bound that actually fired is a timeout; anything else is a
-            // real transport or protocol failure and must keep its own reason.
-            if timedOut.didFire { throw BackupFailure.timeout }
             throw error
         }
     }
