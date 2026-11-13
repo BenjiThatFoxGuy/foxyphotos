@@ -1,9 +1,6 @@
 package gay.benjifox.foxyphotos.provider.google
 
-import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
-
-class GoogleCredential internal constructor(
+class GoogleCredential constructor(
     val accountEmail: String,
     val androidId: String,
     private val formFields: List<Pair<String, String>>,
@@ -11,14 +8,13 @@ class GoogleCredential internal constructor(
     val hasRequiredFields: Boolean
         get() = GoogleCredentialParser.requiredFields.all { fieldValue(it).isNullOrBlank().not() }
 
-    @JvmSynthetic
-    internal fun authRequestFields(): List<Pair<String, String>> = formFields
+    /** Sensitive form fields; pass directly to the auth transport and never log. */
+    fun authRequestFields(): List<Pair<String, String>> = formFields
         .filterNot { (name, _) -> name in ignoredAuthFields || name == "app" || name == "callerPkg" }
         .plus("app" to googlePhotosPackage)
         .plus("callerPkg" to googlePhotosPackage)
 
-    @JvmSynthetic
-    internal fun requiresTokenBinding(): Boolean = !fieldValue("token_binding_alias").isNullOrBlank()
+    fun requiresTokenBinding(): Boolean = !fieldValue("token_binding_alias").isNullOrBlank()
 
     override fun toString(): String = "GoogleCredential(accountEmail=$accountEmail)"
 
@@ -66,5 +62,26 @@ object GoogleCredentialParser {
         )
     }
 
-    private fun decode(value: String): String = URLDecoder.decode(value, StandardCharsets.UTF_8)
+    private fun decode(value: String): String {
+        val normalized = value.replace('+', ' ')
+        val result = StringBuilder()
+        var index = 0
+        while (index < normalized.length) {
+            if (normalized[index] != '%') {
+                result.append(normalized[index++])
+                continue
+            }
+            val encoded = mutableListOf<Byte>()
+            while (index < normalized.length && normalized[index] == '%') {
+                require(index + 2 < normalized.length) { "Malformed credential form encoding." }
+                val high = normalized[index + 1].digitToIntOrNull(16)
+                val low = normalized[index + 2].digitToIntOrNull(16)
+                require(high != null && low != null) { "Malformed credential form encoding." }
+                encoded.add(((high shl 4) or low).toByte())
+                index += 3
+            }
+            result.append(encoded.toByteArray().decodeToString(throwOnInvalidSequence = true))
+        }
+        return result.toString()
+    }
 }
