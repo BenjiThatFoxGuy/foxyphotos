@@ -287,7 +287,9 @@ struct ContentView: View {
                     backupStatus! += " \(result.albumRequests) album placements acknowledged, not remotely verified."
                 }
                 if result.albumUnresolved > 0 {
-                    backupStatus! += " \(result.albumUnresolved) album placements need review; uncertain writes won't auto-replay."
+                    let issues = result.albumIssues.sorted { $0.key < $1.key }
+                        .map { "\($0.key): \($0.value)" }.joined(separator: "; ")
+                    backupStatus! += " \(result.albumUnresolved) album placements unresolved (\(issues)). No uncertain writes were replayed."
                 }
                 if result.deletionRequested > 0 {
                     backupStatus! += result.deletionSucceeded

@@ -5,7 +5,7 @@ import FoxyPhotosGoogleCore
 final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport, URLSessionTaskDelegate {
     private let lock = NSLock()
     private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
-    private var activeTask: URLSessionTask?
+    private var activeTasks: [UUID: URLSessionTask] = [:]
 
     // Never forward a bearer or auth-form request to a redirect target.
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -25,9 +25,10 @@ final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport, URLSession
         var outgoing = URLRequest(url: url)
         outgoing.httpMethod = request.method
         for (name, value) in request.headers { outgoing.setValue(value, forHTTPHeaderField: name) }
+        let token = UUID()
         let done: @Sendable (Data?, URLResponse?, Error?) -> Void = { [weak self] data, response, error in
             self?.lock.lock()
-            self?.activeTask = nil
+            self?.activeTasks.removeValue(forKey: token)
             self?.lock.unlock()
             guard error == nil, let http = response as? HTTPURLResponse, let data,
                   data.count <= 8 * 1024 * 1024 else {
@@ -53,16 +54,16 @@ final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport, URLSession
             task = session.uploadTask(with: outgoing, from: body, completionHandler: done)
         }
         lock.lock()
-        activeTask = task
+        activeTasks[token] = task
         lock.unlock()
         task.resume()
     }
 
     func cancelActive() {
         lock.lock()
-        let task = activeTask
-        activeTask = nil
+        let tasks = Array(activeTasks.values)
+        activeTasks.removeAll()
         lock.unlock()
-        task?.cancel()
+        tasks.forEach { $0.cancel() }
     }
 }

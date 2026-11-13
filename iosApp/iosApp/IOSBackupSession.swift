@@ -12,6 +12,7 @@ struct BackupResult {
     let deletionIneligible: Int
     let albumRequests: Int
     let albumUnresolved: Int
+    let albumIssues: [String: Int]
 }
 
 private struct StagedAsset {
@@ -152,11 +153,20 @@ final class IOSBackupSession {
         let journal = try BackupReceipts(credential: credential)
         let albumJournal = try IOSAlbumJournal(credential: credential)
         let albumBridge = GoogleAlbumBridge(transport: transport)
-        let remoteAlbums = try? await albumBridge.list(credentialForm: credential)
+        // Read-only album discovery can run while PhotoKit stages the first original.
+        async let initialAlbumListing: [GoogleAlbum]? = try? await albumBridge.list(credentialForm: credential)
+        var remoteAlbums: [GoogleAlbum]?
+        var albumListingLoaded = false
+        var retriedAlbumList = false
         let titleCounts = Dictionary(grouping: albumNames.values, by: { $0 }).mapValues(\.count)
         let assets = await Task.detached(priority: .userInitiated) { selectedAssets(selected) }.value
         var confirmed = 0, skipped = 0, failed = 0, deletionIneligible = 0
         var albumRequests = 0, albumUnresolved = 0
+        var albumIssues: [String: Int] = [:]
+        func noteAlbumIssue(_ reason: String) {
+            albumUnresolved += 1
+            albumIssues[reason, default: 0] += 1
+        }
         var deletionCandidates: [PHAsset] = []
         let bridge = GoogleUploadBridge(transport: transport)
         for selectedAsset in assets {
@@ -183,14 +193,33 @@ final class IOSBackupSession {
                         else { deletionIneligible += 1 }
                     }
                 }
+                if !albumListingLoaded {
+                    remoteAlbums = await initialAlbumListing
+                    albumListingLoaded = true
+                }
+                if remoteAlbums == nil && !retriedAlbumList {
+                    retriedAlbumList = true
+                    remoteAlbums = try? await albumBridge.list(credentialForm: credential)
+                }
                 for folder in selectedAsset.albumIds {
-                    guard let title = albumNames[folder], titleCounts[title] == 1,
-                          let remoteAlbums else { albumUnresolved += 1; continue }
+                    guard let title = albumNames[folder] else {
+                        noteAlbumIssue("Source album name unavailable")
+                        continue
+                    }
+                    guard titleCounts[title] == 1 else {
+                        noteAlbumIssue("Duplicate source album names")
+                        continue
+                    }
+                    guard let remoteAlbums else {
+                        noteAlbumIssue("Google album listing unavailable")
+                        continue
+                    }
                     let acknowledged = await albumJournal.associate(
                         folder: folder, title: title, contentHash: staged.sha256, mediaKey: mediaKey,
                         albums: remoteAlbums, bridge: albumBridge, credential: credential
                     )
-                    if acknowledged { albumRequests += 1 } else { albumUnresolved += 1 }
+                    if acknowledged { albumRequests += 1 }
+                    else { noteAlbumIssue(albumJournal.issue) }
                 }
             } catch is CancellationError { throw CancellationError() }
             catch { failed += 1 } // A failed or uncertain item never enters cleanup.
@@ -214,7 +243,8 @@ final class IOSBackupSession {
                 return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
                                     deletionRequested: 0, deletionSucceeded: false,
                                     deletionIneligible: deletionIneligible,
-                                    albumRequests: albumRequests, albumUnresolved: albumUnresolved)
+                                    albumRequests: albumRequests, albumUnresolved: albumUnresolved,
+                                    albumIssues: albumIssues)
             }
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -231,6 +261,7 @@ final class IOSBackupSession {
         return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
                             deletionRequested: deletionCandidates.count, deletionSucceeded: deleted,
                             deletionIneligible: deletionIneligible,
-                            albumRequests: albumRequests, albumUnresolved: albumUnresolved)
+                            albumRequests: albumRequests, albumUnresolved: albumUnresolved,
+                            albumIssues: albumIssues)
     }
 }
