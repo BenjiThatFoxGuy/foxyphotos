@@ -103,9 +103,9 @@ class GoogleAlbumBridgeTest {
             response(bytes(1, second))
         ))
         val pages = mutableListOf<String>()
-        val result = GoogleAlbumBridge(fake).listDetailed(credential) { page, count, syncToken ->
+        val result = GoogleAlbumBridge(fake).listDetailed(credential, onPage = { page, count, syncToken ->
             pages += "$page:$count:${syncToken.orEmpty()}"
-        }
+        })
         assertEquals(2, result.albums.size)
         assertEquals(listOf("1:1:", "2:2:"), pages)
     }
