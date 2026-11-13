@@ -102,10 +102,12 @@ class GoogleAlbumBridgeTest {
             response(bytes(1, first)),
             response(bytes(1, second))
         ))
-        val pages = mutableListOf<Pair<Int, Int>>()
-        val result = GoogleAlbumBridge(fake).listDetailed(credential) { page, count -> pages += page to count }
+        val pages = mutableListOf<String>()
+        val result = GoogleAlbumBridge(fake).listDetailed(credential) { page, count, syncToken ->
+            pages += "$page:$count:${syncToken.orEmpty()}"
+        }
         assertEquals(2, result.albums.size)
-        assertEquals(listOf(1 to 1, 2 to 2), pages)
+        assertEquals(listOf("1:1:", "2:2:"), pages)
     }
 
     @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {

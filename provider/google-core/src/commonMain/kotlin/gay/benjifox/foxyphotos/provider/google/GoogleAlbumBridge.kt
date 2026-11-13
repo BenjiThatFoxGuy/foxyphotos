@@ -23,7 +23,8 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
      */
     @Throws(Exception::class)
     suspend fun listDetailed(credentialForm: String, syncToken: String? = null,
-                             onPage: ((Int, Int) -> Unit)? = null): GoogleAlbumListingResult {
+                             onPage: ((Int, Int, String?) -> Unit)? = null,
+                             pageTimeoutMillis: Long = 180_000): GoogleAlbumListingResult {
         val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
         val albums = mutableListOf<GoogleAlbum>()
         val cursors = mutableSetOf<String>()
@@ -36,14 +37,18 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
             } else {
                 GoogleAlbumListRequest.request(cursor)
             }
-            val page = GoogleAlbumProtocol.decode(postAuthorized(auth, libraryEndpoint, body))
+            // Bound each page, not the whole library: one stalled page fails fast
+            // while a genuinely large library keeps paging.
+            val page = GoogleAlbumProtocol.decode(
+                withTimeout(pageTimeoutMillis) { postAuthorized(auth, libraryEndpoint, body) }
+            )
             albums += page.albums
             if (!page.syncToken.isNullOrEmpty()) latestSyncToken = page.syncToken
             require(albums.size <= 5000) { "Album count exceeds safety limit." }
             pageIndex += 1
             // Page progress is the only honest signal: a full library is many
             // pages and the caller needs to show that it is moving.
-            onPage?.invoke(pageIndex, albums.size)
+            onPage?.invoke(pageIndex, albums.size, latestSyncToken)
             cursor = page.nextCursor
             if (cursor == null) {
                 require(albums.groupBy { it.id }.values.all { entries -> entries.distinct().size == 1 })
@@ -60,7 +65,9 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
 
     @Throws(Exception::class)
     suspend fun listDiagnosed(credentialForm: String, syncToken: String?): GoogleAlbumListing =
-        listDiagnosedWithin(credentialForm, 45_000, syncToken)
+        // A full library is many pages; the per-page bound in listDetailed is the
+        // real stall guard, so the overall bound only has to outlive a slow run.
+        listDiagnosedWithin(credentialForm, 1_500_000, syncToken)
 
     internal suspend fun listDiagnosedWithin(credentialForm: String, timeoutMillis: Long, syncToken: String? = null): GoogleAlbumListing = try {
         val result = withTimeout(timeoutMillis) { listDetailed(credentialForm, syncToken) }

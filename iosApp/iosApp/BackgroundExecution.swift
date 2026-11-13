@@ -1,4 +1,3 @@
-import Darwin
 import UIKit
 
 /// Keeps a user-started run alive across the foreground→background transition.
@@ -9,29 +8,46 @@ import UIKit
 /// switches apps, which is exactly when a backup or an album listing would
 /// otherwise be cut off mid-flight.
 ///
-/// Long transfers need `URLSessionConfiguration.background`, which hands the
-/// transfer to `nsurlsessiond`. This type is the cheap, always-available bridge
-/// for the run the user just started.
+/// Long transfers need a `BGProcessingTask`, which hands the run to the system
+/// scheduler. This type is the cheap, always-available bridge for the run the
+/// user just started.
 final class BackgroundExecution {
     private let lock = NSLock()
     private var token: UIBackgroundTaskIdentifier = .invalid
+    private var expired = false
 
     /// Starts the task. `onExpire` runs on the main thread when iOS is about to
     /// suspend the app; cancel the work there.
     func begin(name: String, onExpire: @escaping () -> Void) {
         lock.lock()
-        defer { lock.unlock() }
-        guard token == .invalid else { return }
+        expired = false
+        guard token == .invalid else { lock.unlock(); return }
+        lock.unlock()
         let start = { [weak self] in
-            guard let self, self.token == .invalid else { return }
+            guard let self else { return }
+            self.lock.lock()
+            guard self.token == .invalid else { self.lock.unlock(); return }
             self.token = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
                 guard let self else { return }
-                self.finish()
+                self.lock.lock()
+                self.expired = true
+                let current = self.token
+                self.token = .invalid
+                self.lock.unlock()
+                if current != .invalid { UIApplication.shared.endBackgroundTask(current) }
                 onExpire()
             }
+            self.lock.unlock()
         }
         if Thread.isMainThread { start() }
         else { DispatchQueue.main.sync(execute: start) }
+    }
+
+    /// True once iOS ended the bridge. Callers use this to tell a system
+    /// cancellation apart from an explicit user cancel.
+    var didExpire: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return expired
     }
 
     func finish() {
@@ -48,29 +64,35 @@ final class BackgroundExecution {
     }
 }
 
-/// A cross-process exclusive lock. A foreground pass and a background pass must
-/// not write the receipts, album journal or album cache at the same time.
-final class ProcessLock {
-    private let descriptor: Int32
-    private var locked = false
+/// Serializes a foreground pass and a background pass within one process.
+///
+/// Both passes write the same durable journals, so only one may run at a time.
+/// A `flock` would deny a second lock even when the same process opens the file
+/// twice, which would make every background pass fail as `alreadyRunning`.
+/// This gate is in-process (iOS apps are single-process) and the background
+/// pass waits on it instead of failing.
+enum RunCoordinator {
+    private static let lock = NSLock()
+    private static var active = false
 
-    init?(path: String) {
-        descriptor = open(path, O_CREAT | O_RDWR, 0o666)
-        guard descriptor >= 0 else { return nil }
+    /// Waits up to `timeout` for the current pass to finish. Returns false when
+    /// the wait is cancelled or the timeout elapses.
+    static func acquire(timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            lock.lock()
+            if !active { active = true; lock.unlock(); return true }
+            lock.unlock()
+            guard Date() < deadline else { return false }
+            do {
+                try await Task.sleep(nanoseconds: 200_000_000)
+            } catch {
+                return false
+            }
+        }
     }
 
-    deinit { if descriptor >= 0 { close(descriptor) } }
-
-    func lock() -> Bool {
-        guard !locked else { return true }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { return false }
-        locked = true
-        return true
-    }
-
-    func unlock() {
-        guard locked else { return }
-        flock(descriptor, LOCK_UN)
-        locked = false
+    static func release() {
+        lock.lock(); active = false; lock.unlock()
     }
 }

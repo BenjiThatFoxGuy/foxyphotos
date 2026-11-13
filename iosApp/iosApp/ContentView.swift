@@ -254,6 +254,12 @@ struct ContentView: View {
                 if phase == .background, isBackingUp {
                     IOSBackgroundJobs.scheduleBackup()
                 }
+                // An album refresh is the same kind of long job: hand it to the
+                // scheduler when the user leaves so it does not die with the
+                // foreground bridge.
+                if phase == .background, isIndexing {
+                    IOSBackgroundJobs.scheduleIndex()
+                }
             }
             .sheet(isPresented: $showingPrivatePicker) {
                 PrivatePhotoPicker(inspectFiles: !pickerForBackup) { report, ids, inaccessible in
@@ -368,13 +374,20 @@ struct ContentView: View {
                     backupStatus! += " \(result.deletionIneligible) complex assets kept on device."
                 }
             } catch is CancellationError {
-                // A cancelled run must never be picked up by a later background
-                // pass: the user explicitly stopped it.
-                PendingBackupStore.clear()
-                backupStatus = "Backup cancelled. Confirmed receipts are saved; no deletion was started."
+                if session.background.didExpire {
+                    // iOS ended the foreground bridge. The scheduled processing
+                    // task resumes the same selection; receipts keep it idempotent.
+                    backupStatus = "Moving to the background. Confirmed receipts are saved; no deletion was started."
+                } else {
+                    // The user explicitly stopped it. A later background pass must
+                    // never pick it up.
+                    PendingBackupStore.clear()
+                    backupStatus = "Backup cancelled. Confirmed receipts are saved; no deletion was started."
+                }
             } catch {
-                PendingBackupStore.clear()
-                backupStatus = "Backup could not start. No original was deleted."
+                // A transient failure is not a user cancel: keep the pending
+                // backup so a later pass can finish it.
+                backupStatus = "Backup stopped. Confirmed receipts are saved; no deletion was started."
             }
             isBackingUp = false
             backupSession = nil
@@ -395,7 +408,8 @@ struct ContentView: View {
             } catch is CancellationError {
                 indexStatus = "Album library refresh cancelled. The previous cache was kept."
             } catch {
-                let reason = String(error.localizedDescription.prefix(200))
+                let failure = error as? BackupFailure
+                let reason = failure?.message ?? String(error.localizedDescription.prefix(200))
                 indexStatus = reason.isEmpty
                     ? "Album library refresh failed."
                     : "Album library refresh failed: \(reason)"

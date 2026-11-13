@@ -169,7 +169,7 @@ final class BackupReceipts {
 final class IOSBackupSession {
     private let transport = GoogleURLSessionTransport()
     private let albumTransport = GoogleURLSessionTransport()
-    private let background = BackgroundExecution()
+    let background = BackgroundExecution()
     func cancel() {
         transport.cancelActive()
         albumTransport.cancelActive()
@@ -196,9 +196,8 @@ final class IOSBackupSession {
         let albumJournal = try IOSAlbumJournal(credential: credential)
         // A foreground pass and a background pass can overlap when the app is
         // suspended. Only one may write the receipts, album journal and cache.
-        let runLock = ProcessLock(path: journal.directory.appendingPathComponent("run.lock").path)
-        guard runLock?.lock() == true else { throw BackupFailure.alreadyRunning }
-        defer { runLock?.unlock() }
+        guard await RunCoordinator.acquire(timeout: showsUI ? 120 : 900) else { throw BackupFailure.alreadyRunning }
+        defer { RunCoordinator.release() }
         if showsUI {
             // The user started this run and can see it. Keep it alive across the
             // foreground→background transition, and make it visible.
@@ -334,42 +333,122 @@ final class IOSBackupSession {
                            "Checked \(confirmed + skipped + failed) of \(assets.count) · \(failed) failed")
         }
         var deleted = false
+        var deletionRequested = 0
         if deleteConfirmed && !deletionCandidates.isEmpty {
             try Task.checkCancellation()
-            // Recheck just before the destructive transaction. An asset edited or
-            // expanded while its original uploaded is not the original we confirmed.
-            let safeCandidates = deletionCandidates.compactMap { asset -> PHAsset? in
-                guard let current = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil).firstObject,
-                      current.modificationDate == asset.modificationDate,
-                      PHAssetResource.assetResources(for: current).count == 1,
-                      !current.mediaSubtypes.contains(.photoLive) else { return nil }
-                return current
-            }
-            deletionIneligible += deletionCandidates.count - safeCandidates.count
-            deletionCandidates = safeCandidates
-            guard !deletionCandidates.isEmpty else {
-                return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
-                                    deletionRequested: 0, deletionSucceeded: false,
-                                    deletionIneligible: deletionIneligible,
-                                    albumRequests: albumRequests, albumUnresolved: albumUnresolved,
-                                    albumIssues: albumIssues, albumSource: albumSource)
-            }
-            do {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    PHPhotoLibrary.shared().performChanges({
-                        PHAssetChangeRequest.deleteAssets(deletionCandidates as NSArray)
-                    }) { success, error in
-                        if success { continuation.resume() }
-                        else { continuation.resume(throwing: error ?? BackupFailure.unavailable) }
-                    }
+            if showsUI {
+                // Recheck just before the destructive transaction. An asset edited or
+                // expanded while its original uploaded is not the original we confirmed.
+                let safeCandidates = deletionCandidates.compactMap { asset -> PHAsset? in
+                    guard let current = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil).firstObject,
+                          current.modificationDate == asset.modificationDate,
+                          PHAssetResource.assetResources(for: current).count == 1,
+                          !current.mediaSubtypes.contains(.photoLive) else { return nil }
+                    return current
                 }
+                deletionIneligible += deletionCandidates.count - safeCandidates.count
+                deletionCandidates = safeCandidates
+                deletionRequested = deletionCandidates.count
+                if !deletionCandidates.isEmpty {
+                    do {
+                        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                            PHPhotoLibrary.shared().performChanges({
+                                PHAssetChangeRequest.deleteAssets(deletionCandidates as NSArray)
+                            }) { success, error in
+                                if success { continuation.resume() }
+                                else { continuation.resume(throwing: error ?? BackupFailure.unavailable) }
+                            }
+                        }
+                        deleted = true
+                    } catch { /* Receipts remain durable; surface failed deletion separately. */ }
+                }
+            } else {
+                // iOS mediates deletion with a prompt, which cannot be presented from a
+                // background pass. Record the intent; the foreground finishes it.
+                deletionRequested = deletionCandidates.count
+                PendingDeletionStore.append(deletionCandidates.map {
+                    PendingDeletion.Entry(assetId: $0.localIdentifier,
+                                          modificationDate: $0.modificationDate?.timeIntervalSince1970)
+                })
+            }
+        }
+        if showsUI {
+            let carried = await finishPendingDeletions()
+            deletionIneligible += carried.ineligible
+            if carried.deleted > 0 {
                 deleted = true
-            } catch { /* Receipts remain durable; surface failed deletion separately. */ }
+                deletionRequested += carried.deleted
+            }
         }
         return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
-                            deletionRequested: deletionCandidates.count, deletionSucceeded: deleted,
+                            deletionRequested: deletionRequested, deletionSucceeded: deleted,
                             deletionIneligible: deletionIneligible,
                             albumRequests: albumRequests, albumUnresolved: albumUnresolved,
                             albumIssues: albumIssues, albumSource: albumSource)
+    }
+
+    /// Finishes deletions a background pass could not perform. iOS mediates each
+    /// deletion with a prompt, which cannot be presented from a background pass,
+    /// so the intent is recorded and completed here.
+    ///
+    /// Every asset is rechecked immediately before the destructive transaction:
+    /// an asset edited or expanded while its original uploaded is not the
+    /// original that was confirmed.
+    private static func finishPendingDeletions() async -> (deleted: Int, ineligible: Int) {
+        guard let pending = PendingDeletionStore.load(), !pending.entries.isEmpty else { return (0, 0) }
+        var eligible: [PHAsset] = []
+        var ineligible = 0
+        for entry in pending.entries {
+            guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [entry.assetId], options: nil).firstObject else {
+                // Already gone; nothing to delete.
+                continue
+            }
+            if let stored = entry.modificationDate {
+                guard let current = asset.modificationDate,
+                      abs(current.timeIntervalSince1970 - stored) <= 1 else {
+                    ineligible += 1
+                    continue
+                }
+            }
+            if PHAssetResource.assetResources(for: asset).count != 1
+                || asset.mediaSubtypes.contains(.photoLive) {
+                ineligible += 1
+            } else {
+                eligible.append(asset)
+            }
+        }
+        guard !eligible.isEmpty else {
+            PendingDeletionStore.clear()
+            return (0, ineligible)
+        }
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.deleteAssets(eligible as NSArray)
+                }) { success, error in
+                    if success { continuation.resume() }
+                    else { continuation.resume(throwing: error ?? BackupFailure.unavailable) }
+                }
+            }
+        } catch {
+            // Keep the intent so a later foreground pass can retry.
+            return (0, ineligible)
+        }
+        PendingDeletionStore.clear()
+        return (eligible.count, ineligible)
+    }
+}
+
+extension BackupFailure {
+    /// A readable reason. The raw `NSError` code (0-5) tells the user nothing.
+    var message: String {
+        switch self {
+        case .unavailable: return "The Google provider is unavailable."
+        case .noOriginal: return "No original is available for this asset."
+        case .emptyResource: return "The original resource is empty."
+        case .missingCredential: return "The Google credential is missing."
+        case .alreadyRunning: return "Another pass is already running."
+        case .timeout: return "The album listing took too long."
+        }
     }
 }
