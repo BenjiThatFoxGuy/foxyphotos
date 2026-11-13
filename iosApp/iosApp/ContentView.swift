@@ -111,7 +111,7 @@ struct ContentView: View {
     @State private var importingCredential = false
     @State private var credentialInput = ""
     @State private var credentialConfigured = GoogleCredentialStore.isConfigured
-    @State private var credentialMessage: String?
+    @State private var credentialError: String?
     @State private var deleteConfirmedOriginals = false
     @State private var isBackingUp = false
     @State private var backupProgress = 0.0
@@ -169,16 +169,13 @@ struct ContentView: View {
                     }
                     Section("Backup provider") {
                         Button(credentialConfigured ? "Replace Google credential" : "Paste Google credential") {
-                            credentialMessage = nil
+                            credentialError = nil
                             importingCredential = true
                         }
                         Text(credentialConfigured
                              ? "Credential stored on this device."
                              : "Paste your Google Photos credential string before backing up.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        if let credentialMessage {
-                            Text(credentialMessage).font(.footnote).foregroundStyle(.secondary)
-                        }
                     }
                     Section("Backup") {
                         Toggle("Delete confirmed originals after backup", isOn: $deleteConfirmedOriginals)
@@ -213,7 +210,10 @@ struct ContentView: View {
                 selection.refresh()
                 credentialConfigured = GoogleCredentialStore.isConfigured
             }
-            .sheet(isPresented: $importingCredential, onDismiss: { credentialInput = "" }) {
+            .sheet(isPresented: $importingCredential, onDismiss: {
+                credentialInput = ""
+                credentialError = nil
+            }) {
                 NavigationStack {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Paste the Google Photos auth string used on Android.")
@@ -226,8 +226,8 @@ struct ContentView: View {
                             .autocorrectionDisabled()
                             .privacySensitive()
                             .accessibilityLabel("Google Photos credential")
-                        if let credentialMessage {
-                            Text(credentialMessage).font(.footnote).foregroundStyle(.secondary)
+                        if let credentialError {
+                            Text(credentialError).font(.footnote).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
                     }
@@ -243,13 +243,13 @@ struct ContentView: View {
                                 do {
                                     try GoogleCredentialStore.save(credentialInput)
                                     credentialConfigured = GoogleCredentialStore.isConfigured
-                                    credentialMessage = "Credential saved on this device."
+                                    credentialError = nil
                                     credentialInput = ""
                                     importingCredential = false
                                 } catch GoogleCredentialStore.ImportError.invalidCredential {
-                                    credentialMessage = "Invalid Google credential string. Check the pasted value."
+                                    credentialError = "Invalid Google credential string. Check the pasted value."
                                 } catch {
-                                    credentialMessage = "Could not save credential. The previous one was kept."
+                                    credentialError = "Could not save credential. The previous one was kept."
                                 }
                             }
                             .disabled(credentialInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
