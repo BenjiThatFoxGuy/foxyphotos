@@ -3,6 +3,8 @@ import SwiftUI
 import UIKit
 
 private struct PhotoAlbum: Identifiable {
+    static let cameraRollId = "foxyphotos:camera-roll"
+
     let id: String
     let title: String
     let imageCount: Int
@@ -29,28 +31,37 @@ private final class PhotoSelection: ObservableObject {
     func refresh() {
         access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard hasAccess else { albums = []; return }
-        var result: [PhotoAlbum] = []
-        for type in [PHAssetCollectionType.smartAlbum, .album] {
-            let collections = PHAssetCollection.fetchAssetCollections(with: type, subtype: .any, options: nil)
-            collections.enumerateObjects { collection, _, _ in
-                let assets = PHAsset.fetchAssets(in: collection, options: nil)
-                var imageCount = 0
-                var videoCount = 0
-                assets.enumerateObjects { asset, _, _ in
-                    switch asset.mediaType {
-                    case .image: imageCount += 1
-                    case .video: videoCount += 1
-                    default: break
-                    }
-                }
-                if imageCount + videoCount > 0 {
-                    result.append(PhotoAlbum(id: collection.localIdentifier,
+        let imageOptions = PHFetchOptions()
+        imageOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        let videoOptions = PHFetchOptions()
+        videoOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
+
+        // Camera Roll represents the entire accessible library. User albums are
+        // overlapping views, not separate copies of their assets.
+        let cameraRoll = PhotoAlbum(id: PhotoAlbum.cameraRollId,
+                                    title: "Camera Roll",
+                                    imageCount: PHAsset.fetchAssets(with: .image, options: nil).count,
+                                    videoCount: PHAsset.fetchAssets(with: .video, options: nil).count)
+        var userAlbums: [PhotoAlbum] = []
+        let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
+        collections.enumerateObjects { collection, _, _ in
+            let imageCount = PHAsset.fetchAssets(in: collection, options: imageOptions).count
+            let videoCount = PHAsset.fetchAssets(in: collection, options: videoOptions).count
+            if imageCount + videoCount > 0 {
+                userAlbums.append(PhotoAlbum(id: collection.localIdentifier,
                                              title: collection.localizedTitle ?? "Album",
                                              imageCount: imageCount, videoCount: videoCount))
-                }
             }
         }
-        albums = result.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        albums = [cameraRoll] + userAlbums.sorted {
+            $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+        // A fresh install starts with Camera Roll; an intentionally empty
+        // selection remains empty across relaunches and permission changes.
+        if UserDefaults.standard.object(forKey: "selected-albums") == nil {
+            selected = [PhotoAlbum.cameraRollId]
+            UserDefaults.standard.set([PhotoAlbum.cameraRollId], forKey: "selected-albums")
+        }
     }
 
     func toggle(_ id: String) {
