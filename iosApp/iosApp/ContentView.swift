@@ -1,6 +1,7 @@
 import Photos
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 private struct PhotoAlbum: Identifiable, Sendable {
     static let cameraRollId = "foxyphotos:camera-roll"
@@ -108,6 +109,9 @@ private final class PhotoSelection: ObservableObject {
 
 struct ContentView: View {
     @StateObject private var selection = PhotoSelection()
+    @State private var importingCredential = false
+    @State private var credentialConfigured = GoogleCredentialStore.isConfigured
+    @State private var credentialMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -157,6 +161,18 @@ struct ContentView: View {
                             .accessibilityLabel("\(album.title), \(selection.selected.contains(album.id) ? "selected" : "not selected")")
                         }
                     }
+                    Section("Backup provider") {
+                        Button(credentialConfigured ? "Replace Google credential" : "Import Google credential") {
+                            importingCredential = true
+                        }
+                        Text(credentialConfigured
+                             ? "Credential stored on this device. Uploads are not enabled yet."
+                             : "Import your Google Photos credential file to prepare this device for backup.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if let credentialMessage {
+                            Text(credentialMessage).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                     Section {
                         Button("Back up selected albums") {}
                             .disabled(true)
@@ -176,7 +192,26 @@ struct ContentView: View {
                     .disabled(selection.isRefreshing)
                 }
             }
-            .onAppear { selection.refresh() }
+            .onAppear {
+                selection.refresh()
+                credentialConfigured = GoogleCredentialStore.isConfigured
+            }
+            .fileImporter(isPresented: $importingCredential, allowedContentTypes: [.item]) { result in
+                switch result {
+                case .success(let url):
+                    do {
+                        try GoogleCredentialStore.importFile(url)
+                        credentialConfigured = GoogleCredentialStore.isConfigured
+                        credentialMessage = "Credential saved securely."
+                    } catch GoogleCredentialStore.ImportError.invalidFile {
+                        credentialMessage = "This file is not a supported Google credential form."
+                    } catch {
+                        credentialMessage = "Credential import failed. The previous credential was kept."
+                    }
+                case .failure:
+                    credentialMessage = "Credential import was not completed."
+                }
+            }
         }
     }
 }
