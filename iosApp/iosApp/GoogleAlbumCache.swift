@@ -8,14 +8,24 @@ import FoxyPhotosGoogleCore
 /// library sync token captured by the last successful listing.
 struct GoogleAlbumCache {
     private let fileURL: URL
+    private let checkpointURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     init(directory: URL, scope: String) {
         fileURL = directory.appendingPathComponent("\(scope).google-albums.json")
+        checkpointURL = directory.appendingPathComponent("\(scope).google-albums.checkpoint.json")
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.withoutEscapingSlashes]
         decoder.dateDecodingStrategy = .iso8601
+    }
+
+    /// Durable progress for an interrupted listing. Written after every page so
+    /// the next run resumes from the cursor instead of starting over.
+    struct Checkpoint: Codable {
+        var cursor: String?
+        var syncToken: String?
+        var fetchedAt: Date
     }
 
     struct CachedAlbum: Codable, Equatable {
@@ -70,4 +80,18 @@ struct GoogleAlbumCache {
     }
 
     func clear() { try? FileManager.default.removeItem(at: fileURL) }
+
+    func loadCheckpoint() -> Checkpoint? {
+        guard let data = try? Data(contentsOf: checkpointURL),
+              let checkpoint = try? decoder.decode(Checkpoint.self, from: data) else { return nil }
+        return checkpoint
+    }
+
+    func storeCheckpoint(_ checkpoint: Checkpoint) {
+        guard let data = try? encoder.encode(checkpoint) else { return }
+        let options: Data.WritingOptions = [.atomic, .completeFileProtectionUnlessOpen]
+        try? data.write(to: checkpointURL, options: options)
+    }
+
+    func clearCheckpoint() { try? FileManager.default.removeItem(at: checkpointURL) }
 }

@@ -19,7 +19,8 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
 
     /**
      * Full album library. Pass a previously captured sync token to refresh only
-     * what changed; a null token pulls every page.
+     * what changed; a null token pulls every page. Pass a cursor captured by a
+     * previous interrupted run to resume instead of starting over.
      *
      * There is deliberately no page or whole-run bound: a large library is many
      * pages and the transport's own request timeout is the only stall guard.
@@ -28,13 +29,15 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
      */
     @Throws(Exception::class)
     suspend fun listDetailed(credentialForm: String, syncToken: String? = null,
-                             onPage: ((Int, Int, String?) -> Unit)? = null): GoogleAlbumListingResult {
+                             startCursor: String? = null,
+                             onPage: ((Int, Int, String?, String?) -> Unit)? = null): GoogleAlbumListingResult {
         val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
         val albums = mutableListOf<GoogleAlbum>()
         val cursors = mutableSetOf<String>()
-        var cursor: String? = null
+        var cursor: String? = startCursor
         var latestSyncToken = syncToken
         var pageIndex = 0
+        startCursor?.let(cursors::add)
         repeat(10_000) {
             val body = if (cursor == null && syncToken != null) {
                 GoogleAlbumListRequest.syncRequest(syncToken)
@@ -46,10 +49,12 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
             if (!page.syncToken.isNullOrEmpty()) latestSyncToken = page.syncToken
             require(albums.size <= 5000) { "Album count exceeds safety limit." }
             pageIndex += 1
+            val nextCursor = page.nextCursor
             // Page progress is the only honest signal: a full library is many
-            // pages and the caller needs to show that it is moving.
-            onPage?.invoke(pageIndex, albums.size, latestSyncToken)
-            cursor = page.nextCursor
+            // pages and the caller needs to show that it is moving. The cursor is
+            // included so an interrupted listing can resume instead of restarting.
+            onPage?.invoke(pageIndex, albums.size, latestSyncToken, nextCursor)
+            cursor = nextCursor
             if (cursor == null) {
                 require(albums.groupBy { it.id }.values.all { entries -> entries.distinct().size == 1 })
                 return GoogleAlbumListingResult(albums.distinctBy { it.id }, latestSyncToken)

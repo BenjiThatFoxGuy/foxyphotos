@@ -103,11 +103,28 @@ class GoogleAlbumBridgeTest {
             response(bytes(1, second))
         ))
         val pages = mutableListOf<String>()
-        val result = GoogleAlbumBridge(fake).listDetailed(credential, onPage = { page, count, syncToken ->
-            pages += "$page:$count:${syncToken.orEmpty()}"
+        val result = GoogleAlbumBridge(fake).listDetailed(credential, onPage = { page, count, syncToken, nextCursor ->
+            pages += "$page:$count:${syncToken.orEmpty()}:${nextCursor.orEmpty()}"
         })
         assertEquals(2, result.albums.size)
-        assertEquals(listOf("1:1:", "2:2:"), pages)
+        assertEquals(listOf("1:1::cursor", "2:2::"), pages)
+    }
+
+    @Test fun `listing resumes from a saved cursor instead of restarting`() = runBlocking {
+        fun entry(id: String) = text(1, id) + bytes(2, text(5, "Album") + GoogleNativeProtocol.varintField(7, 1))
+        val second = bytes(3, entry("id-2"))
+        val fake = Fake(listOf(
+            response("Auth=bearer\n".encodeToByteArray()),
+            response(bytes(1, second))
+        ))
+        val cursors = mutableListOf<String?>()
+        val result = GoogleAlbumBridge(fake).listDetailed(credential, startCursor = "cursor-1",
+            onPage = { _, _, _, nextCursor -> cursors += nextCursor })
+        assertEquals(listOf(GoogleAlbum("id-2", "Album", 1L, null)), result.albums)
+        assertEquals(listOf<String?>(null), cursors)
+        val sent = GoogleNativeProtocol.ProtoFields(Base64.getDecoder().decode(fake.requests[1].bodyBase64))
+        assertEquals("cursor-1", sent.message(1)?.string(4))
+        assertNull(sent.message(1)?.string(6))
     }
 
     @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {
