@@ -6,10 +6,8 @@ import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import platform.CommonCrypto.CC_SHA1
-import platform.CommonCrypto.CC_SHA1_DIGEST_LENGTH
-import platform.CommonCrypto.CC_SHA256
-import platform.CommonCrypto.CC_SHA256_DIGEST_LENGTH
+import gay.benjifox.foxyphotos.core.platform.Sha256Digest
+import platform.Foundation.timeIntervalSince1970
 import platform.Foundation.NSData
 import platform.Foundation.create
 import platform.Photos.PHAsset
@@ -120,7 +118,12 @@ class PhotosLibraryScanner : MediaScanner {
 
         val bytes = data.toByteArray()
         val sha1 = sha1(bytes)
-        val sha256 = sha256(bytes)
+        val sha256 = Sha256Digest().run {
+            update(bytes, 0, bytes.size)
+            val hex = digestHex()
+            close()
+            ByteArray(32) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+        }
 
         // Update sizeBytes now that we have the actual data
         val sized = media.copy(sizeBytes = bytes.size.toLong())
@@ -158,9 +161,9 @@ class PhotosLibraryScanner : MediaScanner {
 
         return suspendCancellableCoroutine { cont ->
             val options = PHImageRequestOptions().apply {
-                isSynchronous = false
+                synchronous = false
                 version = PHImageRequestOptionsVersionOriginal
-                isNetworkAccessAllowed = true
+                networkAccessAllowed = true
             }
             PHImageManager.defaultManager().requestImageDataAndOrientationForAsset(
                 asset = asset,
@@ -178,25 +181,6 @@ class PhotosLibraryScanner : MediaScanner {
         }
     }
 
-    private fun sha1(bytes: ByteArray): ByteArray {
-        val digest = ByteArray(CC_SHA1_DIGEST_LENGTH)
-        bytes.usePinned { src ->
-            digest.usePinned { dst ->
-                CC_SHA1(src.addressOf(0), bytes.size.toUInt(), dst.addressOf(0))
-            }
-        }
-        return digest
-    }
-
-    private fun sha256(bytes: ByteArray): ByteArray {
-        val digest = ByteArray(CC_SHA256_DIGEST_LENGTH)
-        bytes.usePinned { src ->
-            digest.usePinned { dst ->
-                CC_SHA256(src.addressOf(0), bytes.size.toUInt(), dst.addressOf(0))
-            }
-        }
-        return digest
-    }
 }
 
 /** Convert NSData to ByteArray. */
