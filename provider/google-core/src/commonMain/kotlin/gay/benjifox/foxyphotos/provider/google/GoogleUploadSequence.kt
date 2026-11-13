@@ -137,6 +137,7 @@ class GoogleUploadSequenceException(message: String) : IllegalStateException(mes
 
 /** Swift passes hex digests and a form string; neither needs an exported Kotlin ByteArray. */
 class GoogleUploadBridge(private val transport: GoogleHttpTransport) {
+    @Throws(Exception::class)
     suspend fun upload(
         credentialForm: String, filePath: String, fileName: String,
         sizeBytes: Long, modifiedEpochSeconds: Long, sha1Hex: String,
