@@ -37,7 +37,7 @@ final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport {
         if let path = request.originalFilePath {
             task = URLSession.shared.uploadTask(with: outgoing, fromFile: URL(fileURLWithPath: path), completionHandler: done)
         } else {
-            guard let body = request.bodyBase64.flatMap(Data.init(base64Encoded:)) else {
+            guard let encoded = request.bodyBase64, let body = Data(base64Encoded: encoded) else {
                 completion.complete(response: nil, error: "Invalid request body")
                 return
             }
