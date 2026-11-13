@@ -41,4 +41,25 @@ class PortableBackupRunnerTest {
         assertEquals(listOf(1, 2), organized)
         assertEquals(BackupCounts(uploaded = 1, alreadyPresent = 1), result.counts)
     }
+    @Test fun `confirmation callback runs in same pass after durable receipt and never for uncertain uploads`() = runBlocking {
+        val events = mutableListOf<String>()
+        val ledger = mutableMapOf<Int, String>()
+        val result = runBackup(
+            items = listOf(1, 2), hash = { it }, isCommitted = { false },
+            upload = { item, _ ->
+                events += "upload:$item"
+                if (item == 1) BackupUploadResult("provider-key") else BackupItemOutcome.Uncertain
+            },
+            recordCommitted = { hash, key ->
+                ledger[hash] = key
+                events += "record:$hash"
+            },
+            onConfirmed = { item, hash ->
+                assertEquals("provider-key", ledger[hash])
+                events += "offer:$item"
+            },
+        )
+        assertEquals(listOf("upload:1", "record:1", "offer:1", "upload:2"), events)
+        assertEquals(BackupCounts(uploaded = 1, uncertain = 1), result.counts)
+    }
 }
