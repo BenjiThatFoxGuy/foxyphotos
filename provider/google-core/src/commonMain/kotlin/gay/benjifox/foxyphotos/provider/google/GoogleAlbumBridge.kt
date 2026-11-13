@@ -22,12 +22,14 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
      * what changed; a null token pulls every page.
      */
     @Throws(Exception::class)
-    suspend fun listDetailed(credentialForm: String, syncToken: String? = null): GoogleAlbumListingResult {
+    suspend fun listDetailed(credentialForm: String, syncToken: String? = null,
+                             onPage: ((Int, Int) -> Unit)? = null): GoogleAlbumListingResult {
         val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
         val albums = mutableListOf<GoogleAlbum>()
         val cursors = mutableSetOf<String>()
         var cursor: String? = null
         var latestSyncToken = syncToken
+        var pageIndex = 0
         repeat(10_000) {
             val body = if (cursor == null && syncToken != null) {
                 GoogleAlbumListRequest.syncRequest(syncToken)
@@ -38,6 +40,10 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
             albums += page.albums
             if (!page.syncToken.isNullOrEmpty()) latestSyncToken = page.syncToken
             require(albums.size <= 5000) { "Album count exceeds safety limit." }
+            pageIndex += 1
+            // Page progress is the only honest signal: a full library is many
+            // pages and the caller needs to show that it is moving.
+            onPage?.invoke(pageIndex, albums.size)
             cursor = page.nextCursor
             if (cursor == null) {
                 require(albums.groupBy { it.id }.values.all { entries -> entries.distinct().size == 1 })

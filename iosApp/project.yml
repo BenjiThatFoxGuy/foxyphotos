@@ -1,8 +1,10 @@
 name: FoxyPhotos
 options:
   bundleIdPrefix: gay.benjifox
+  # ActivityKit Live Activities need 16.1. The widget extension is embedded in
+  # the app, so the whole app moves to that floor.
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "16.1"
   createIntermediateGroups: true
 
 settings:
@@ -15,11 +17,9 @@ settings:
     CODE_SIGNING_ALLOWED: "NO"
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
     TARGETED_DEVICE_FAMILY: "1,2"
-    GENERATE_INFOPLIST_FILE: "YES"
-    INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
-    INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-    INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "FoxyPhotos backs up the photos and videos you choose to a provider you own."
-    INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "FoxyPhotos restores your backups to the photo library you chose."
+    # The app target now carries a hand-written Info.plist (BGTaskScheduler and
+    # array-valued keys cannot be expressed as INFOPLIST_KEY_ build settings).
+    GENERATE_INFOPLIST_FILE: "NO"
 
 # Both targets compile the same Swift sources and differ only in which Kotlin
 # framework slices they link. One target is enough per build, so the device
@@ -30,6 +30,36 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+        excludes:
+          - "LiveActivity"
+          - "LiveActivity/**"
+    info:
+      path: iosApp/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: FoxyPhotos
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSPhotoLibraryUsageDescription: "FoxyPhotos backs up the photos and videos you choose to a provider you own."
+        NSPhotoLibraryAddUsageDescription: "FoxyPhotos restores your backups to the photo library you chose."
+        # Lock Screen / Dynamic Island progress for a running backup or index.
+        NSSupportsLiveActivities: true
+        BGTaskSchedulerPermittedIdentifiers:
+          - gay.benjifox.foxyphotos.album-index
+          - gay.benjifox.foxyphotos.backup
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: gay.benjifox.foxyphotos
@@ -48,12 +78,42 @@ targets:
         embedType: embed
       - framework: ../provider/google-core/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosGoogleCore.framework
         embedType: embed
+      - target: FoxyPhotosLiveActivity
 
   FoxyPhotosDevice:
     type: application
     platform: iOS
     sources:
       - path: iosApp
+        excludes:
+          - "LiveActivity"
+          - "LiveActivity/**"
+    info:
+      path: iosApp/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: FoxyPhotos
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSPhotoLibraryUsageDescription: "FoxyPhotos backs up the photos and videos you choose to a provider you own."
+        NSPhotoLibraryAddUsageDescription: "FoxyPhotos restores your backups to the photo library you chose."
+        NSSupportsLiveActivities: true
+        BGTaskSchedulerPermittedIdentifiers:
+          - gay.benjifox.foxyphotos.album-index
+          - gay.benjifox.foxyphotos.backup
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: gay.benjifox.foxyphotos
@@ -72,17 +132,52 @@ targets:
         embedType: embed
       - framework: ../provider/google-core/build/bin/iosArm64/debugFramework/FoxyPhotosGoogleCore.framework
         embedType: embed
+      - target: FoxyPhotosLiveActivity
+
+  # Displays the Live Activity. ActivityAttributes is shared source: the app
+  # starts and updates the activity, this target only renders its content state.
+  FoxyPhotosLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: iosApp/LiveActivity
+      - path: iosApp/Shared/AlbumIndexAttributes.swift
+    info:
+      path: iosApp/LiveActivity/Info.plist
+      properties:
+        CFBundleDisplayName: FoxyPhotos
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: XPC!
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: gay.benjifox.foxyphotos.liveactivity
+        PRODUCT_NAME: FoxyPhotosLiveActivity
+        SKIP_INSTALL: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
 
 schemes:
   FoxyPhotos:
     build:
       targets:
         FoxyPhotos: all
+        FoxyPhotosLiveActivity: all
+    archive:
+      config: Debug
     run:
       config: Debug
   FoxyPhotosDevice:
     build:
       targets:
         FoxyPhotosDevice: all
+        FoxyPhotosLiveActivity: all
+    archive:
+      config: Debug
     run:
       config: Debug

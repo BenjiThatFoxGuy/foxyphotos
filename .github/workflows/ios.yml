@@ -26,10 +26,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      # Kotlin/Native compiles the shared core straight to a static framework for
-      # the iOS simulator. This is the step that proves the portable modules have
-      # no JVM-only dependencies.
-      - name: Build shared core for iOS simulator
+      # Kotlin/Native compiles the shared core to a static framework for both the
+      # simulator and the device. This is the step that proves the portable
+      # modules have no JVM-only dependencies.
+      - name: Build shared core for both iOS variants
         run: |
           ./gradlew \
             :core:platform:linkDebugFrameworkIosSimulatorArm64 \
@@ -38,6 +38,12 @@ jobs:
             :provider:contract:linkDebugFrameworkIosSimulatorArm64 \
             :provider:foundation:linkDebugFrameworkIosSimulatorArm64 \
             :provider:google-core:linkDebugFrameworkIosSimulatorArm64 \
+            :core:platform:linkDebugFrameworkIosArm64 \
+            :core:model:linkDebugFrameworkIosArm64 \
+            :core:backup:linkDebugFrameworkIosArm64 \
+            :provider:contract:linkDebugFrameworkIosArm64 \
+            :provider:foundation:linkDebugFrameworkIosArm64 \
+            :provider:google-core:linkDebugFrameworkIosArm64 \
             --stacktrace
 
       - name: Install XcodeGen
@@ -51,7 +57,7 @@ jobs:
       # generic/platform=iOS Simulator builds every standard architecture, so the
       # app wanted an x86_64 slice the Gradle-built Kotlin frameworks do not
       # contain. ARCHS pins it to the runner's own slice (macos-26-arm64).
-      - name: Build iOS app
+      - name: Build iOS app for the simulator
         run: |
           xcodebuild \
             -project iosApp/FoxyPhotos.xcodeproj \
@@ -61,6 +67,21 @@ jobs:
             -derivedDataPath iosApp/build/DerivedData \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=YES \
+            build
+
+      # The device target links the arm64 Kotlin frameworks and carries the Live
+      # Activity extension. It is the same target the IPA is archived from, so it
+      # is compiled here too.
+      - name: Build iOS app for the device
+        run: |
+          xcodebuild \
+            -project iosApp/FoxyPhotos.xcodeproj \
+            -scheme FoxyPhotosDevice \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath iosApp/build/DerivedData \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
             build
 
   # Produces the sideloadable artifact. Unsigned on purpose: AltStore re-signs it
@@ -115,7 +136,8 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES
 
       # An .ipa is just Payload/<App>.app zipped. ExportArchive needs a provisioning
-      # profile, so the archive is packaged by hand.
+      # profile, so the archive is packaged by hand. The Live Activity extension is
+      # embedded by the app target; AltStore re-signs the whole bundle.
       - name: Package the IPA
         run: |
           cd iosApp/build

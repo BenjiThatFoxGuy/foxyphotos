@@ -26,8 +26,7 @@ private struct StagedAsset {
     let safeToDelete: Bool
 }
 
-private enum BackupFailure: Error { case unavailable, noOriginal, emptyResource, missingCredential }
-
+enum BackupFailure: Error { case unavailable, noOriginal, emptyResource, missingCredential, alreadyRunning, timeout }
 private struct SelectedBackupAsset {
     let asset: PHAsset
     var albumIds: [String]
@@ -134,7 +133,7 @@ private func stage(_ asset: PHAsset) async throws -> StagedAsset {
 }
 
 /// An atomic, credential-scoped receipt journal. Missing or corrupt journals never imply success.
-private final class BackupReceipts {
+final class BackupReceipts {
     private let url: URL
     private var items: [String: String]
 
@@ -170,6 +169,7 @@ private final class BackupReceipts {
 final class IOSBackupSession {
     private let transport = GoogleURLSessionTransport()
     private let albumTransport = GoogleURLSessionTransport()
+    private let background = BackgroundExecution()
     func cancel() {
         transport.cancelActive()
         albumTransport.cancelActive()
@@ -186,14 +186,35 @@ final class IOSBackupSession {
 
     /// Read-only album discovery can run while PhotoKit stages the first original.
     func run(selected: Set<String>, albumNames: [String: String], pickedIds: [String]? = nil,
-             deleteConfirmed: Bool,
-             progress: @escaping (Int, Int, Int, String) async -> Void) async throws -> BackupResult {
+             deleteConfirmed: Bool, showsUI: Bool = true,
+             onProgress: @escaping (Int, Int, Int, String) async -> Void) async throws -> BackupResult {
         guard let credentialData = GoogleCredentialStore.load(),
               let credential = String(data: credentialData, encoding: .utf8) else {
             throw BackupFailure.missingCredential
         }
         let journal = try BackupReceipts(credential: credential)
         let albumJournal = try IOSAlbumJournal(credential: credential)
+        // A foreground pass and a background pass can overlap when the app is
+        // suspended. Only one may write the receipts, album journal and cache.
+        let runLock = ProcessLock(path: journal.directory.appendingPathComponent("run.lock").path)
+        guard runLock?.lock() == true else { throw BackupFailure.alreadyRunning }
+        defer { runLock?.unlock() }
+        if showsUI {
+            // The user started this run and can see it. Keep it alive across the
+            // foreground→background transition, and make it visible.
+            background.begin(name: "foxyphotos-backup") { self.cancel() }
+            defer { background.finish() }
+            AlbumIndexActivity.start(name: "FoxyPhotos backup")
+            defer { AlbumIndexActivity.end() }
+        }
+        let callerProgress = onProgress
+        func report(_ completed: Int, _ total: Int, _ failed: Int, _ phase: String) async {
+            if showsUI {
+                AlbumIndexActivity.update(phase: phase, completed: completed, total: total,
+                                          failed: failed, library: "")
+            }
+            await callerProgress(completed, total, failed, phase)
+        }
         let albumBridge = GoogleAlbumBridge(transport: albumTransport)
         let albumCache = GoogleAlbumCache(directory: journal.directory, scope: journal.scope)
         let cachedAlbums = albumCache.load()
@@ -225,12 +246,12 @@ final class IOSBackupSession {
         for (index, selectedAsset) in assets.enumerated() {
             let asset = selectedAsset.asset
             try Task.checkCancellation()
-            await progress(confirmed + skipped + failed, assets.count, failed,
+            await report(confirmed + skipped + failed, assets.count, failed,
                            "Fetching original \(index + 1) of \(assets.count)…")
             do {
                 let staged = try await stage(asset)
                 defer { try? FileManager.default.removeItem(at: staged.url) }
-                await progress(confirmed + skipped + failed, assets.count, failed,
+                await report(confirmed + skipped + failed, assets.count, failed,
                                "Confirming original \(index + 1) of \(assets.count)…")
                 let mediaKey: String
                 if let existing = journal.mediaKey(staged.sha256), !existing.isEmpty {
@@ -250,7 +271,7 @@ final class IOSBackupSession {
                         else { deletionIneligible += 1 }
                     }
                 }
-                await progress(confirmed + skipped + failed, assets.count, failed,
+                await report(confirmed + skipped + failed, assets.count, failed,
                                "Finding matching Google albums…")
                 if !albumListingLoaded {
                     let listing = await initialAlbumListing
@@ -309,7 +330,7 @@ final class IOSBackupSession {
                 }
             } catch is CancellationError { throw CancellationError() }
             catch { failed += 1 } // A failed or uncertain item never enters cleanup.
-            await progress(confirmed + skipped + failed, assets.count, failed,
+            await report(confirmed + skipped + failed, assets.count, failed,
                            "Checked \(confirmed + skipped + failed) of \(assets.count) · \(failed) failed")
         }
         var deleted = false

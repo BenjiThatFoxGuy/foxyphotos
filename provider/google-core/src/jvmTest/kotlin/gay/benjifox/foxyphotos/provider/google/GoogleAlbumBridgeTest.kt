@@ -93,6 +93,21 @@ class GoogleAlbumBridgeTest {
         assertNull(sent.message(1)?.string(4))
     }
 
+    @Test fun `page progress reports each page as it is read`() = runBlocking {
+        fun entry(id: String) = text(1, id) + bytes(2, text(5, "Album") + GoogleNativeProtocol.varintField(7, 1))
+        val first = text(1, "cursor") + bytes(3, entry("id-1"))
+        val second = bytes(3, entry("id-2"))
+        val fake = Fake(listOf(
+            response("Auth=bearer\n".encodeToByteArray()),
+            response(bytes(1, first)),
+            response(bytes(1, second))
+        ))
+        val pages = mutableListOf<Pair<Int, Int>>()
+        val result = GoogleAlbumBridge(fake).listDetailed(credential) { page, count -> pages += page to count }
+        assertEquals(2, result.albums.size)
+        assertEquals(listOf(1 to 1, 2 to 2), pages)
+    }
+
     @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {
         val hanging = object : GoogleHttpTransport {
             var cancelled = false

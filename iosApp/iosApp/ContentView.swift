@@ -121,6 +121,9 @@ struct ContentView: View {
     @State private var backupStatus: String?
     @State private var backupTask: Task<Void, Never>?
     @State private var backupSession: IOSBackupSession?
+    @State private var isIndexing = false
+    @State private var indexStatus: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -201,6 +204,18 @@ struct ContentView: View {
                             Text(backupStatus).font(.footnote).foregroundStyle(.secondary)
                         }
                     }
+                    Section("Google album library") {
+                        Button("Refresh Google album library") { refreshAlbumLibrary() }
+                            .disabled(isIndexing || isBackingUp || !credentialConfigured)
+                        Text("Album placement matches your Google albums by name. Refreshing caches the whole library on this device and uses the library sync token, so repeats only fetch what changed.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if isIndexing {
+                            ProgressView("Indexing Google albums…")
+                        }
+                        if let indexStatus {
+                            Text(indexStatus).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Section("Private picker test") {
                     Button("Inspect a few photos with iOS picker") {
@@ -230,6 +245,15 @@ struct ContentView: View {
             .onAppear {
                 selection.refresh()
                 credentialConfigured = GoogleCredentialStore.isConfigured
+            }
+            .onChange(of: scenePhase) { phase in
+                // Submit the processing task only once the app is actually
+                // backgrounded. Submitting earlier lets the scheduler fire it
+                // while the foreground run is still writing, and the two passes
+                // would race on the receipts.
+                if phase == .background, isBackingUp {
+                    IOSBackgroundJobs.scheduleBackup()
+                }
             }
             .sheet(isPresented: $showingPrivatePicker) {
                 PrivatePhotoPicker(inspectFiles: !pickerForBackup) { report, ids, inaccessible in
@@ -308,6 +332,12 @@ struct ContentView: View {
         let albumNames = Dictionary(uniqueKeysWithValues: selection.albums
             .filter { chosen.contains($0.id) }.map { ($0.id, $0.title) })
         let shouldDelete = deleteConfirmedOriginals
+        // Persist the selection before the run starts so a background pass can
+        // finish it if iOS suspends the foreground run. Receipts make a repeat
+        // idempotent, so an overlap cannot upload the same original twice.
+        PendingBackupStore.save(PendingBackup(albumIds: Array(chosen), albumNames: albumNames,
+                                              pickedIds: pickedIds, deleteConfirmed: shouldDelete,
+                                              enqueuedAt: Date()))
         backupTask = Task {
             do {
                 let result = try await session.run(selected: chosen, albumNames: albumNames,
@@ -318,6 +348,7 @@ struct ContentView: View {
                     }
                 }
                 backupProgress = 1
+                PendingBackupStore.clear()
                 backupStatus = "\(result.confirmed) confirmed, \(result.skipped) already backed up, \(result.failed) failed."
                 backupStatus! += " Album library: \(result.albumSource)."
                 if result.albumRequests > 0 {
@@ -337,13 +368,39 @@ struct ContentView: View {
                     backupStatus! += " \(result.deletionIneligible) complex assets kept on device."
                 }
             } catch is CancellationError {
+                // A cancelled run must never be picked up by a later background
+                // pass: the user explicitly stopped it.
+                PendingBackupStore.clear()
                 backupStatus = "Backup cancelled. Confirmed receipts are saved; no deletion was started."
             } catch {
+                PendingBackupStore.clear()
                 backupStatus = "Backup could not start. No original was deleted."
             }
             isBackingUp = false
             backupSession = nil
             backupTask = nil
+        }
+    }
+
+    @MainActor private func refreshAlbumLibrary() {
+        guard !isIndexing, credentialConfigured else { return }
+        isIndexing = true
+        indexStatus = "Indexing Google albums…"
+        Task {
+            do {
+                let result = try await IOSAlbumIndexer.refresh { phase in
+                    await MainActor.run { indexStatus = phase }
+                }
+                indexStatus = "\(result.albumCount) Google albums cached. \(result.source)."
+            } catch is CancellationError {
+                indexStatus = "Album library refresh cancelled. The previous cache was kept."
+            } catch {
+                let reason = String(error.localizedDescription.prefix(200))
+                indexStatus = reason.isEmpty
+                    ? "Album library refresh failed."
+                    : "Album library refresh failed: \(reason)"
+            }
+            isIndexing = false
         }
     }
 }
