@@ -51,6 +51,22 @@ class GoogleAlbumBridgeTest {
         assertEquals("Google listing Provider returned HTTP 503", result.issue)
     }
 
+    @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {
+        val hanging = object : GoogleHttpTransport {
+            var cancelled = false
+            override fun send(request: GoogleHttpRequest, completion: GoogleHttpCompletion) {
+                if (request.url == "https://android.googleapis.com/auth") {
+                    completion.complete(response("Auth=bearer\n".encodeToByteArray()), null)
+                }
+            }
+            override fun cancelActive() { cancelled = true }
+        }
+        val result = GoogleAlbumBridge(hanging).listDiagnosedWithin(credential, 50)
+        assertNull(result.albums)
+        assertEquals("Google album listing timed out", result.issue)
+        assertTrue(hanging.cancelled)
+    }
+
     @Test fun `creation receipt proves album id but addition is separate`() = runBlocking {
         val fake = Fake(listOf(response("Auth=bearer\n".encodeToByteArray()),
             response(bytes(1, text(1, "created-id"))),
