@@ -3,7 +3,7 @@ import WidgetKit
 
 @main
 struct FoxyPhotosLiveActivityBundle: WidgetBundle {
-    var body: some WidgetBundle {
+    var body: some Widget {
         AlbumIndexLiveActivity()
     }
 }
