@@ -88,7 +88,7 @@ class GoogleUploadSequence(private val transport: GoogleHttpTransport) {
         return ConfirmedGoogleUpload(key, alreadyPresent = false)
     }
 
-    private suspend fun authenticate(credential: GoogleCredential): String {
+    internal suspend fun authenticate(credential: GoogleCredential): String {
         val form = credential.authRequestFields().joinToString("&") { (name, value) ->
             "${encodeForm(name)}=${encodeForm(value)}"
         }.encodeToByteArray()
@@ -111,7 +111,7 @@ class GoogleUploadSequence(private val transport: GoogleHttpTransport) {
         return "Bearer $token"
     }
 
-    private suspend fun send(request: GoogleHttpRequest): GoogleHttpResponse = suspendCancellableCoroutine { continuation ->
+    internal suspend fun send(request: GoogleHttpRequest): GoogleHttpResponse = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { transport.cancelActive() }
         try {
             transport.send(request, object : GoogleHttpCompletion {

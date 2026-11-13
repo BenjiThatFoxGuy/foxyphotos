@@ -39,6 +39,9 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
         post(credentialForm, addEndpoint, GoogleAlbumProtocol.add(albumId, mediaKey, nowSeconds))
     }
 
+    fun hasCapacity(album: GoogleAlbum?, reserved: Int): Boolean =
+        album?.count?.let { it >= 0 && reserved >= 0 && it < 20_000L - reserved } ?: false
+
     private suspend fun post(credentialForm: String, endpoint: String, body: ByteArray): ByteArray {
         val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
         return provider.send(GoogleHttpRequest(endpoint, "POST", mapOf(

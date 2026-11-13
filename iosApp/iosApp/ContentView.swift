@@ -269,10 +269,13 @@ struct ContentView: View {
         backupProgress = 0
         backupStatus = "Preparing selected originals…"
         let chosen = selection.selected
+        let albumNames = Dictionary(uniqueKeysWithValues: selection.albums
+            .filter { chosen.contains($0.id) }.map { ($0.id, $0.title) })
         let shouldDelete = deleteConfirmedOriginals
         backupTask = Task {
             do {
-                let result = try await session.run(selected: chosen, deleteConfirmed: shouldDelete) { completed, total, failed in
+                let result = try await session.run(selected: chosen, albumNames: albumNames,
+                                                   deleteConfirmed: shouldDelete) { completed, total, failed in
                     await MainActor.run {
                         backupProgress = total == 0 ? 1 : Double(completed) / Double(total)
                         backupStatus = "Checked \(completed) of \(total) · \(failed) failed"
@@ -280,6 +283,12 @@ struct ContentView: View {
                 }
                 backupProgress = 1
                 backupStatus = "\(result.confirmed) confirmed, \(result.skipped) already backed up, \(result.failed) failed."
+                if result.albumRequests > 0 {
+                    backupStatus! += " \(result.albumRequests) album requests accepted; membership not remotely verified."
+                }
+                if result.albumUnresolved > 0 {
+                    backupStatus! += " \(result.albumUnresolved) album placements need review; uncertain writes won't auto-replay."
+                }
                 if result.deletionRequested > 0 {
                     backupStatus! += result.deletionSucceeded
                         ? " \(result.deletionRequested) originals deleted with iOS approval."

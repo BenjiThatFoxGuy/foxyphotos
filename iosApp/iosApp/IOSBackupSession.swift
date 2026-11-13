@@ -10,6 +10,8 @@ struct BackupResult {
     let deletionRequested: Int
     let deletionSucceeded: Bool
     let deletionIneligible: Int
+    let albumRequests: Int
+    let albumUnresolved: Int
 }
 
 private struct StagedAsset {
@@ -24,21 +26,35 @@ private struct StagedAsset {
 
 private enum BackupFailure: Error { case unavailable, noOriginal, emptyResource, missingCredential }
 
+private struct SelectedBackupAsset {
+    let asset: PHAsset
+    var albumIds: [String]
+}
+
 /// Never use a filename or an asset identifier as an upload identity. Hash the exact original bytes.
-private func selectedAssets(_ selected: Set<String>) -> [PHAsset] {
+private func selectedAssets(_ selected: Set<String>) -> [SelectedBackupAsset] {
     guard !selected.isEmpty else { return [] }
-    var seen = Set<String>()
-    var assets: [PHAsset] = []
-    func append(_ found: PHFetchResult<PHAsset>) {
+    var positions: [String: Int] = [:]
+    var assets: [SelectedBackupAsset] = []
+    func append(_ found: PHFetchResult<PHAsset>, source: String) {
         found.enumerateObjects { asset, _, _ in
             guard asset.mediaType == .image || asset.mediaType == .video else { return }
-            if seen.insert(asset.localIdentifier).inserted { assets.append(asset) }
+            if let position = positions[asset.localIdentifier] {
+                assets[position].albumIds.append(source)
+            } else {
+                positions[asset.localIdentifier] = assets.count
+                assets.append(SelectedBackupAsset(asset: asset, albumIds: [source]))
+            }
         }
     }
-    if selected.contains("foxyphotos:camera-roll") { append(PHAsset.fetchAssets(with: nil)) }
+    if selected.contains("foxyphotos:camera-roll") {
+        append(PHAsset.fetchAssets(with: nil), source: "foxyphotos:camera-roll")
+    }
     for id in selected.sorted() where id != "foxyphotos:camera-roll" {
         let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [id], options: nil)
-        collections.enumerateObjects { collection, _, _ in append(PHAsset.fetchAssets(in: collection, options: nil)) }
+        collections.enumerateObjects { collection, _, _ in
+            append(PHAsset.fetchAssets(in: collection, options: nil), source: id)
+        }
     }
     return assets
 }
@@ -110,6 +126,7 @@ private final class BackupReceipts {
     }
 
     func contains(_ sha256: String) -> Bool { items[sha256] != nil }
+    func mediaKey(_ sha256: String) -> String? { items[sha256] }
 
     func record(_ sha256: String, providerKey: String) throws {
         guard !providerKey.isEmpty else { throw BackupFailure.unavailable }
@@ -126,24 +143,32 @@ final class IOSBackupSession {
     private let transport = GoogleURLSessionTransport()
     func cancel() { transport.cancelActive() }
 
-    func run(selected: Set<String>, deleteConfirmed: Bool,
+    func run(selected: Set<String>, albumNames: [String: String], deleteConfirmed: Bool,
              progress: @escaping (Int, Int, Int) async -> Void) async throws -> BackupResult {
         guard let credentialData = GoogleCredentialStore.load(),
               let credential = String(data: credentialData, encoding: .utf8) else {
             throw BackupFailure.missingCredential
         }
         let journal = try BackupReceipts(credential: credential)
+        let albumJournal = try IOSAlbumJournal(credential: credential)
+        let albumBridge = GoogleAlbumBridge(transport: transport)
+        let remoteAlbums = try? await albumBridge.list(credentialForm: credential)
+        let titleCounts = Dictionary(grouping: albumNames.values, by: { $0 }).mapValues(\.count)
         let assets = await Task.detached(priority: .userInitiated) { selectedAssets(selected) }.value
         var confirmed = 0, skipped = 0, failed = 0, deletionIneligible = 0
+        var albumRequests = 0, albumUnresolved = 0
         var deletionCandidates: [PHAsset] = []
         let bridge = GoogleUploadBridge(transport: transport)
-        for asset in assets {
+        for selectedAsset in assets {
+            let asset = selectedAsset.asset
             try Task.checkCancellation()
             do {
                 let staged = try await stage(asset)
                 defer { try? FileManager.default.removeItem(at: staged.url) }
-                if journal.contains(staged.sha256) {
+                let mediaKey: String
+                if let existing = journal.mediaKey(staged.sha256), !existing.isEmpty {
                     skipped += 1
+                    mediaKey = existing
                 } else {
                     let receipt = try await bridge.upload(
                         credentialForm: credential, filePath: staged.url.path,
@@ -152,10 +177,20 @@ final class IOSBackupSession {
                     )
                     try journal.record(staged.sha256, providerKey: receipt.mediaKey)
                     confirmed += 1
+                    mediaKey = receipt.mediaKey
                     if deleteConfirmed {
                         if staged.safeToDelete { deletionCandidates.append(asset) }
                         else { deletionIneligible += 1 }
                     }
+                }
+                for folder in selectedAsset.albumIds {
+                    guard let title = albumNames[folder], titleCounts[title] == 1,
+                          let remoteAlbums else { albumUnresolved += 1; continue }
+                    let acknowledged = await albumJournal.associate(
+                        folder: folder, title: title, contentHash: staged.sha256, mediaKey: mediaKey,
+                        albums: remoteAlbums, bridge: albumBridge, credential: credential
+                    )
+                    if acknowledged { albumRequests += 1 } else { albumUnresolved += 1 }
                 }
             } catch is CancellationError { throw CancellationError() }
             catch { failed += 1 } // A failed or uncertain item never enters cleanup.
@@ -178,7 +213,8 @@ final class IOSBackupSession {
             guard !deletionCandidates.isEmpty else {
                 return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
                                     deletionRequested: 0, deletionSucceeded: false,
-                                    deletionIneligible: deletionIneligible)
+                                    deletionIneligible: deletionIneligible,
+                                    albumRequests: albumRequests, albumUnresolved: albumUnresolved)
             }
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -194,6 +230,7 @@ final class IOSBackupSession {
         }
         return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
                             deletionRequested: deletionCandidates.count, deletionSucceeded: deleted,
-                            deletionIneligible: deletionIneligible)
+                            deletionIneligible: deletionIneligible,
+                            albumRequests: albumRequests, albumUnresolved: albumUnresolved)
     }
 }
