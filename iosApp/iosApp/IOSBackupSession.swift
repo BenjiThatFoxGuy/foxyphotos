@@ -373,7 +373,7 @@ final class IOSBackupSession {
             }
         }
         if showsUI {
-            let carried = await finishPendingDeletions()
+            let carried = await Self.finishPendingDeletions()
             deletionIneligible += carried.ineligible
             if carried.deleted > 0 {
                 deleted = true
