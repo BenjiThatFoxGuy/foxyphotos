@@ -55,6 +55,9 @@ targets:
         NSPhotoLibraryAddUsageDescription: "FoxyPhotos restores your backups to the photo library you chose."
         # Lock Screen / Dynamic Island progress for a running backup or index.
         NSSupportsLiveActivities: true
+        # Apple's documented BGProcessingTask setup declares the processing mode.
+        UIBackgroundModes:
+          - processing
         BGTaskSchedulerPermittedIdentifiers:
           - gay.benjifox.foxyphotos.album-index
           - gay.benjifox.foxyphotos.backup
@@ -107,6 +110,9 @@ targets:
         NSPhotoLibraryUsageDescription: "FoxyPhotos backs up the photos and videos you choose to a provider you own."
         NSPhotoLibraryAddUsageDescription: "FoxyPhotos restores your backups to the photo library you chose."
         NSSupportsLiveActivities: true
+        # Apple's documented BGProcessingTask setup declares the processing mode.
+        UIBackgroundModes:
+          - processing
         BGTaskSchedulerPermittedIdentifiers:
           - gay.benjifox.foxyphotos.album-index
           - gay.benjifox.foxyphotos.backup
