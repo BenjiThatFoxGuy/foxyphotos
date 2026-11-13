@@ -124,7 +124,9 @@ class GoogleAlbumBridgeTest {
         assertEquals(listOf<String?>(null), cursors)
         val sent = GoogleNativeProtocol.ProtoFields(Base64.getDecoder().decode(fake.requests[1].bodyBase64))
         assertEquals("cursor-1", sent.message(1)?.string(4))
-        assertNull(sent.message(1)?.string(6))
+        // The listing template always carries an empty sync-token field; a
+        // resumed listing must leave it empty rather than send one.
+        assertEquals("", sent.message(1)?.string(6))
     }
 
     @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {
