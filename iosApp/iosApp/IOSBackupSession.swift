@@ -178,7 +178,7 @@ final class IOSBackupSession {
         let albumJournal = try IOSAlbumJournal(credential: credential)
         let albumBridge = GoogleAlbumBridge(transport: transport)
         // Read-only album discovery can run while PhotoKit stages the first original.
-        async let initialAlbumListing: GoogleAlbumListing = await albumBridge.listDiagnosed(credentialForm: credential)
+        async let initialAlbumListing: GoogleAlbumListing? = try? await albumBridge.listDiagnosed(credentialForm: credential)
         var remoteAlbums: [GoogleAlbum]?
         var listingIssue = "Google album listing unavailable"
         var albumListingLoaded = false
@@ -223,15 +223,15 @@ final class IOSBackupSession {
                 }
                 if !albumListingLoaded {
                     let listing = await initialAlbumListing
-                    remoteAlbums = listing.albums
-                    listingIssue = listing.issue ?? listingIssue
+                    remoteAlbums = listing?.albums
+                    listingIssue = listing?.issue ?? listingIssue
                     albumListingLoaded = true
                 }
                 if remoteAlbums == nil && !retriedAlbumList {
                     retriedAlbumList = true
-                    let listing = await albumBridge.listDiagnosed(credentialForm: credential)
-                    remoteAlbums = listing.albums
-                    listingIssue = listing.issue ?? listingIssue
+                    let listing = try? await albumBridge.listDiagnosed(credentialForm: credential)
+                    remoteAlbums = listing?.albums
+                    listingIssue = listing?.issue ?? listingIssue
                 }
                 for folder in selectedAsset.albumIds {
                     guard let title = effectiveNames[folder] else {
