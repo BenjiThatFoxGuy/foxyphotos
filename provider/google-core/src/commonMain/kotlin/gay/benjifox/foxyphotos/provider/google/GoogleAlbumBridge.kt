@@ -1,5 +1,7 @@
 package gay.benjifox.foxyphotos.provider.google
 
+data class GoogleAlbumListing(val albums: List<GoogleAlbum>?, val issue: String?)
+
 /** Shared Google album protocol. HTTP acknowledgement is not membership confirmation. */
 class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     private val provider = GoogleUploadSequence(transport)
@@ -9,13 +11,14 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
 
     @Throws(Exception::class)
     suspend fun list(credentialForm: String): List<GoogleAlbum> {
+        val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
         val albums = mutableListOf<GoogleAlbum>()
         val cursors = mutableSetOf<String>()
         var cursor: String? = null
-        repeat(10) {
-            val page = GoogleAlbumProtocol.decode(post(credentialForm, libraryEndpoint, GoogleAlbumListRequest.request(cursor)))
+        repeat(10_000) {
+            val page = GoogleAlbumProtocol.decode(postAuthorized(auth, libraryEndpoint, GoogleAlbumListRequest.request(cursor)))
             albums += page.albums
-            require(albums.size <= 5000) { "Incomplete album listing." }
+            require(albums.size <= 5000) { "Album count exceeds safety limit." }
             cursor = page.nextCursor
             if (cursor == null) {
                 require(albums.groupBy { it.id }.values.all { entries -> entries.distinct().size == 1 })
@@ -23,7 +26,19 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
             }
             require(cursors.add(cursor!!)) { "Repeated album page." }
         }
-        throw GoogleUploadSequenceException("Incomplete album listing.")
+        throw GoogleUploadSequenceException("Album page limit reached.")
+    }
+
+    /** A bounded, credential-free failure reason for the device status panel. */
+    suspend fun listDiagnosed(credentialForm: String): GoogleAlbumListing = try {
+        GoogleAlbumListing(list(credentialForm), null)
+    } catch (e: GoogleUploadSequenceException) {
+        val message = e.message.orEmpty()
+        GoogleAlbumListing(null, if (message.startsWith("Provider returned HTTP ") &&
+            message.removePrefix("Provider returned HTTP ").removeSuffix(".").all { it.isDigit() })
+            "Google listing ${message.removeSuffix(".")}" else "Google listing request failed")
+    } catch (_: Exception) {
+        GoogleAlbumListing(null, "Google listing response could not be decoded")
     }
 
     @Throws(Exception::class)
@@ -43,8 +58,10 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     fun hasCapacity(album: GoogleAlbum?, reserved: Int): Boolean =
         album?.count?.let { it >= 0 && reserved >= 0 && it < 20_000L - reserved } ?: false
 
-    private suspend fun post(credentialForm: String, endpoint: String, body: ByteArray): ByteArray {
-        val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
+    private suspend fun post(credentialForm: String, endpoint: String, body: ByteArray): ByteArray =
+        postAuthorized(provider.authenticate(GoogleCredentialParser.parse(credentialForm)), endpoint, body)
+
+    private suspend fun postAuthorized(auth: String, endpoint: String, body: ByteArray): ByteArray {
         return provider.send(GoogleHttpRequest(endpoint, "POST", mapOf(
             "Authorization" to auth,
             "User-Agent" to "Google Photos/49029607 (Pixel XL; Android 9)",

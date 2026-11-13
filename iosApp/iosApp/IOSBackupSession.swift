@@ -178,8 +178,9 @@ final class IOSBackupSession {
         let albumJournal = try IOSAlbumJournal(credential: credential)
         let albumBridge = GoogleAlbumBridge(transport: transport)
         // Read-only album discovery can run while PhotoKit stages the first original.
-        async let initialAlbumListing: [GoogleAlbum]? = try? await albumBridge.list(credentialForm: credential)
+        async let initialAlbumListing: GoogleAlbumListing = await albumBridge.listDiagnosed(credentialForm: credential)
         var remoteAlbums: [GoogleAlbum]?
+        var listingIssue = "Google album listing unavailable"
         var albumListingLoaded = false
         var retriedAlbumList = false
         let (assets, effectiveNames) = try await Task.detached(priority: .userInitiated) {
@@ -221,12 +222,16 @@ final class IOSBackupSession {
                     }
                 }
                 if !albumListingLoaded {
-                    remoteAlbums = await initialAlbumListing
+                    let listing = await initialAlbumListing
+                    remoteAlbums = listing.albums
+                    listingIssue = listing.issue ?? listingIssue
                     albumListingLoaded = true
                 }
                 if remoteAlbums == nil && !retriedAlbumList {
                     retriedAlbumList = true
-                    remoteAlbums = try? await albumBridge.list(credentialForm: credential)
+                    let listing = await albumBridge.listDiagnosed(credentialForm: credential)
+                    remoteAlbums = listing.albums
+                    listingIssue = listing.issue ?? listingIssue
                 }
                 for folder in selectedAsset.albumIds {
                     guard let title = effectiveNames[folder] else {
@@ -238,7 +243,7 @@ final class IOSBackupSession {
                         continue
                     }
                     guard let remoteAlbums else {
-                        noteAlbumIssue("Google album listing unavailable")
+                        noteAlbumIssue(listingIssue)
                         continue
                     }
                     let acknowledged = await albumJournal.associate(

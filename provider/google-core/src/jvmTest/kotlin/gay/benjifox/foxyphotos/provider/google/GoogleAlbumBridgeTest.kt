@@ -29,6 +29,28 @@ class GoogleAlbumBridgeTest {
         assertEquals("https://photosdata-pa.googleapis.com/6439526531001121323/18047484249733410717", fake.requests[1].url)
     }
 
+    @Test fun `lists beyond ten pages with one authentication`() = runBlocking {
+        val pages = (0..11).map { index ->
+            val entry = text(1, "id-$index") + bytes(2, text(5, "Album $index") + GoogleNativeProtocol.varintField(7, 1))
+            val container = (if (index < 11) text(1, "cursor-$index") else byteArrayOf()) + bytes(3, entry)
+            response(bytes(1, container))
+        }
+        val fake = Fake(listOf(response("Auth=bearer\n".encodeToByteArray())) + pages)
+        val albums = GoogleAlbumBridge(fake).list(credential)
+        assertEquals(12, albums.size)
+        assertEquals(13, fake.requests.size)
+        assertEquals(1, fake.requests.count { it.url == "https://android.googleapis.com/auth" })
+        val nextPage = GoogleNativeProtocol.ProtoFields(Base64.getDecoder().decode(fake.requests[2].bodyBase64))
+        assertEquals("cursor-0", nextPage.message(1)?.string(4))
+    }
+
+    @Test fun `listing failure exposes only bounded HTTP status`() = runBlocking {
+        val fake = Fake(listOf(response("Auth=bearer\n".encodeToByteArray()), GoogleHttpResponse(503, emptyMap(), "")))
+        val result = GoogleAlbumBridge(fake).listDiagnosed(credential)
+        assertNull(result.albums)
+        assertEquals("Google listing Provider returned HTTP 503", result.issue)
+    }
+
     @Test fun `creation receipt proves album id but addition is separate`() = runBlocking {
         val fake = Fake(listOf(response("Auth=bearer\n".encodeToByteArray()),
             response(bytes(1, text(1, "created-id"))),
