@@ -363,13 +363,15 @@ final class IOSBackupSession {
                     } catch { /* Receipts remain durable; surface failed deletion separately. */ }
                 }
             } else {
-                // iOS mediates deletion with a prompt, which cannot be presented from a
-                // background pass. Record the intent; the foreground finishes it.
+                // A background pass cannot present iOS's deletion prompt. Record the
+                // intent and tell the user; the foreground finishes it.
                 deletionRequested = deletionCandidates.count
-                PendingDeletionStore.append(deletionCandidates.map {
+                let entries = deletionCandidates.map {
                     PendingDeletion.Entry(assetId: $0.localIdentifier,
                                           modificationDate: $0.modificationDate?.timeIntervalSince1970)
-                })
+                }
+                PendingDeletionStore.append(entries)
+                DeletionNotifier.notify(entries: entries.count)
             }
         }
         if showsUI {
@@ -394,7 +396,7 @@ final class IOSBackupSession {
     /// Every asset is rechecked immediately before the destructive transaction:
     /// an asset edited or expanded while its original uploaded is not the
     /// original that was confirmed.
-    private static func finishPendingDeletions() async -> (deleted: Int, ineligible: Int) {
+    static func finishPendingDeletions() async -> (deleted: Int, ineligible: Int) {
         guard let pending = PendingDeletionStore.load(), !pending.entries.isEmpty else { return (0, 0) }
         var eligible: [PHAsset] = []
         var ineligible = 0
