@@ -11,13 +11,14 @@ class GoogleUploadSequenceTest {
     )
     private val digest = ByteArray(20) { it.toByte() }
     private fun field(number: Int, bytes: ByteArray) = GoogleNativeProtocol.bytesField(number, bytes)
-    private fun response(body: ByteArray, headers: Map<String, String> = emptyMap()) = GoogleHttpResponse(200, headers, body)
+    private fun response(body: ByteArray, headers: Map<String, String> = emptyMap()) =
+        GoogleHttpResponse(200, headers, Base64.getEncoder().encodeToString(body))
 
     private class Fake(private val responses: List<GoogleHttpResponse>) : GoogleHttpTransport {
         val requests = mutableListOf<GoogleHttpRequest>()
-        override fun send(request: GoogleHttpRequest, completion: (GoogleHttpResponse?, String?) -> Unit) {
+        override fun send(request: GoogleHttpRequest, completion: GoogleHttpCompletion) {
             requests += request
-            completion(responses[requests.size - 1], null)
+            completion.complete(responses[requests.size - 1], null)
         }
         override fun cancelActive() = Unit
     }

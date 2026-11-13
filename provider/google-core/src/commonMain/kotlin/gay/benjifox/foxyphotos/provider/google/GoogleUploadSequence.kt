@@ -6,8 +6,12 @@ import kotlin.coroutines.resumeWithException
 
 /** Platform HTTP seam: iOS uses URLSession file uploads; JVM can use OkHttp. */
 interface GoogleHttpTransport {
-    fun send(request: GoogleHttpRequest, completion: (GoogleHttpResponse?, String?) -> Unit)
+    fun send(request: GoogleHttpRequest, completion: GoogleHttpCompletion)
     fun cancelActive()
+}
+
+interface GoogleHttpCompletion {
+    fun complete(response: GoogleHttpResponse?, error: String?)
 }
 
 class GoogleHttpRequest(
@@ -16,10 +20,12 @@ class GoogleHttpRequest(
     val headers: Map<String, String>,
     val body: ByteArray? = null,
     val originalFilePath: String? = null,
-)
+) {
+    val bodyBase64: String? get() = body?.let(::base64)
+}
 
-class GoogleHttpResponse(val status: Int, val headers: Map<String, String>, val body: ByteArray) {
-    fun header(name: String): String? = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+class GoogleHttpResponse(val status: Int, val headers: Map<String, String>, val bodyBase64: String) {
+    val body: ByteArray get() = decodeBase64(bodyBase64)
 }
 
 data class ConfirmedGoogleUpload(val mediaKey: String, val alreadyPresent: Boolean)
@@ -58,7 +64,9 @@ class GoogleUploadSequence(private val transport: GoogleHttpTransport) {
                 "X-Upload-Content-Length" to sizeBytes.toString(),
             ), GoogleNativeProtocol.encodeUploadTokenRequest(sizeBytes),
         ))
-        val uploadId = uploadResponse.header("X-GUploader-UploadID")?.takeIf { it.isNotBlank() }
+        val uploadId = uploadResponse.headers.entries.firstOrNull {
+            it.key.equals("X-GUploader-UploadID", ignoreCase = true)
+        }?.value?.takeIf { it.isNotBlank() }
             ?: throw GoogleUploadSequenceException("Upload token response was incomplete.")
         // The original file is sent from disk; never load a video into memory.
         val bytesResponse = send(GoogleHttpRequest(
@@ -106,17 +114,19 @@ class GoogleUploadSequence(private val transport: GoogleHttpTransport) {
     private suspend fun send(request: GoogleHttpRequest): GoogleHttpResponse = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { transport.cancelActive() }
         try {
-            transport.send(request) { response, error ->
-                when {
-                    !continuation.isActive -> Unit
-                    error != null -> continuation.resumeWithException(GoogleUploadSequenceException("Provider transport failed."))
-                    response == null -> continuation.resumeWithException(GoogleUploadSequenceException("Provider response missing."))
-                    response.status !in 200..299 -> continuation.resumeWithException(
-                        GoogleUploadSequenceException("Provider returned HTTP ${response.status}.")
-                    )
-                    else -> continuation.resume(response)
+            transport.send(request, object : GoogleHttpCompletion {
+                override fun complete(response: GoogleHttpResponse?, error: String?) {
+                    when {
+                        !continuation.isActive -> Unit
+                        error != null -> continuation.resumeWithException(GoogleUploadSequenceException("Provider transport failed."))
+                        response == null -> continuation.resumeWithException(GoogleUploadSequenceException("Provider response missing."))
+                        response.status !in 200..299 -> continuation.resumeWithException(
+                            GoogleUploadSequenceException("Provider returned HTTP ${response.status}.")
+                        )
+                        else -> continuation.resume(response)
+                    }
                 }
-            }
+            })
         } catch (_: Exception) {
             if (continuation.isActive) continuation.resumeWithException(GoogleUploadSequenceException("Provider transport failed."))
         }
@@ -124,6 +134,42 @@ class GoogleUploadSequence(private val transport: GoogleHttpTransport) {
 }
 
 class GoogleUploadSequenceException(message: String) : IllegalStateException(message)
+
+/** Swift passes hex digests and a form string; neither needs an exported Kotlin ByteArray. */
+class GoogleUploadBridge(private val transport: GoogleHttpTransport) {
+    suspend fun upload(
+        credentialForm: String, filePath: String, fileName: String,
+        sizeBytes: Long, modifiedEpochSeconds: Long, sha1Hex: String,
+    ): ConfirmedGoogleUpload = GoogleUploadSequence(transport).upload(
+        GoogleCredentialParser.parse(credentialForm), filePath, fileName,
+        sizeBytes, modifiedEpochSeconds, decodeHexSha1(sha1Hex),
+    )
+}
+
+private fun decodeHexSha1(value: String): ByteArray {
+    require(value.length == 40)
+    return ByteArray(20) { index ->
+        val high = value[index * 2].digitToInt(16)
+        val low = value[index * 2 + 1].digitToInt(16)
+        ((high shl 4) or low).toByte()
+    }
+}
+
+private fun decodeBase64(value: String): ByteArray {
+    require(value.length % 4 == 0)
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    val result = ArrayList<Byte>(value.length / 4 * 3)
+    for (i in value.indices step 4) {
+        val a = alphabet.indexOf(value[i]); val b = alphabet.indexOf(value[i + 1])
+        val c = if (value[i + 2] == '=') 0 else alphabet.indexOf(value[i + 2])
+        val d = if (value[i + 3] == '=') 0 else alphabet.indexOf(value[i + 3])
+        require(a >= 0 && b >= 0 && c >= 0 && d >= 0)
+        result.add(((a shl 2) or (b shr 4)).toByte())
+        if (value[i + 2] != '=') result.add((((b and 15) shl 4) or (c shr 2)).toByte())
+        if (value[i + 3] != '=') result.add((((c and 3) shl 6) or d).toByte())
+    }
+    return result.toByteArray()
+}
 
 private fun encodeForm(value: String): String = buildString {
     val digits = "0123456789ABCDEF"

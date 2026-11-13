@@ -112,6 +112,12 @@ struct ContentView: View {
     @State private var credentialInput = ""
     @State private var credentialConfigured = GoogleCredentialStore.isConfigured
     @State private var credentialMessage: String?
+    @State private var deleteConfirmedOriginals = false
+    @State private var isBackingUp = false
+    @State private var backupProgress = 0.0
+    @State private var backupStatus: String?
+    @State private var backupTask: Task<Void, Never>?
+    @State private var backupSession: IOSBackupSession?
 
     var body: some View {
         NavigationStack {
@@ -167,18 +173,28 @@ struct ContentView: View {
                             importingCredential = true
                         }
                         Text(credentialConfigured
-                             ? "Credential stored on this device. Uploads are not enabled yet."
-                             : "Paste your Google Photos credential string to prepare this device for backup.")
+                             ? "Credential stored on this device."
+                             : "Paste your Google Photos credential string before backing up.")
                             .font(.footnote).foregroundStyle(.secondary)
                         if let credentialMessage {
                             Text(credentialMessage).font(.footnote).foregroundStyle(.secondary)
                         }
                     }
-                    Section {
-                        Button("Back up selected albums") {}
-                            .disabled(true)
-                        Text("Uploads are not available yet. Your album selection is saved on this device.")
+                    Section("Backup") {
+                        Toggle("Delete confirmed originals after backup", isOn: $deleteConfirmedOriginals)
+                            .disabled(isBackingUp)
+                        Text("Only originals confirmed by Google and saved in the backup ledger qualify. iOS will ask before deleting them.")
                             .font(.footnote).foregroundStyle(.secondary)
+                        Button("Back up selected albums") { startBackup() }
+                            .disabled(isBackingUp || selection.isRefreshing || !credentialConfigured || selection.selected.isEmpty)
+                        if isBackingUp {
+                            ProgressView("Backing up… \(Int(backupProgress * 100))%", value: backupProgress, total: 1)
+                                .progressViewStyle(.linear)
+                            Button("Cancel backup") { backupSession?.cancel(); backupTask?.cancel() }
+                        }
+                        if let backupStatus {
+                            Text(backupStatus).font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -242,6 +258,41 @@ struct ContentView: View {
                 }
                 .presentationDetents([.medium])
             }
+        }
+    }
+
+    @MainActor private func startBackup() {
+        guard !isBackingUp, credentialConfigured, selection.hasAccess, !selection.selected.isEmpty else { return }
+        let session = IOSBackupSession()
+        backupSession = session
+        isBackingUp = true
+        backupProgress = 0
+        backupStatus = "Preparing selected originals…"
+        let chosen = selection.selected
+        let shouldDelete = deleteConfirmedOriginals
+        backupTask = Task {
+            do {
+                let result = try await session.run(selected: chosen, deleteConfirmed: shouldDelete) { completed, total, failed in
+                    await MainActor.run {
+                        backupProgress = total == 0 ? 1 : Double(completed) / Double(total)
+                        backupStatus = "Checked \(completed) of \(total) · \(failed) failed"
+                    }
+                }
+                backupProgress = 1
+                backupStatus = "\(result.confirmed) confirmed, \(result.skipped) already backed up, \(result.failed) failed."
+                if result.deletionRequested > 0 {
+                    backupStatus! += result.deletionSucceeded
+                        ? " \(result.deletionRequested) originals deleted with iOS approval."
+                        : " Original deletion wasn't completed; confirmed backups remain saved."
+                }
+            } catch is CancellationError {
+                backupStatus = "Backup cancelled. Confirmed receipts are saved; no deletion was started."
+            } catch {
+                backupStatus = "Backup could not start. No original was deleted."
+            }
+            isBackingUp = false
+            backupSession = nil
+            backupTask = nil
         }
     }
 }

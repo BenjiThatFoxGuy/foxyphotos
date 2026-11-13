@@ -46,6 +46,8 @@ targets:
         embedType: embed
       - framework: ../provider/foundation/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosFoundation.framework
         embedType: embed
+      - framework: ../provider/google-core/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosGoogleCore.framework
+        embedType: embed
 
   FoxyPhotosDevice:
     type: application
@@ -67,6 +69,8 @@ targets:
       - framework: ../provider/contract/build/bin/iosArm64/debugFramework/FoxyPhotosContract.framework
         embedType: embed
       - framework: ../provider/foundation/build/bin/iosArm64/debugFramework/FoxyPhotosFoundation.framework
+        embedType: embed
+      - framework: ../provider/google-core/build/bin/iosArm64/debugFramework/FoxyPhotosGoogleCore.framework
         embedType: embed
 
 schemes:
