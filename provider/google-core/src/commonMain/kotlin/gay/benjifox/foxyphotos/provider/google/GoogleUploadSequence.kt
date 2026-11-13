@@ -156,7 +156,7 @@ private fun decodeHexSha1(value: String): ByteArray {
     }
 }
 
-private fun decodeBase64(value: String): ByteArray {
+internal fun decodeBase64(value: String): ByteArray {
     require(value.length % 4 == 0)
     val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     val result = ArrayList<Byte>(value.length / 4 * 3)

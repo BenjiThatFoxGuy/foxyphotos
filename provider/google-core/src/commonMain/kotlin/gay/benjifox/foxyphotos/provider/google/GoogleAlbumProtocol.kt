@@ -1,6 +1,5 @@
 package gay.benjifox.foxyphotos.provider.google
 
-import gay.benjifox.foxyphotos.core.model.*
 import gay.benjifox.foxyphotos.provider.google.GoogleNativeProtocol.bytesField
 import gay.benjifox.foxyphotos.provider.google.GoogleNativeProtocol.varintField
 
@@ -15,7 +14,7 @@ interface GoogleAlbumAccess {
 }
 
 /** bclone f6ad6b63 + gpmc 94b1b267 collection metadata; no invented content endpoint. */
-internal object GoogleAlbumProtocol {
+object GoogleAlbumProtocol {
     fun decode(bytes: ByteArray): GoogleAlbumPage {
         val root = GoogleNativeProtocol.ProtoFields(bytes).message(1)
             ?: throw GoogleProtocolException("Album listing unavailable")
@@ -34,13 +33,13 @@ internal object GoogleAlbumProtocol {
         require(cursor == null || cursor.length <= 16384)
         return GoogleAlbumPage(albums, cursor)
     }
-    private fun text(field: Int, value: String) = bytesField(field, value.toByteArray(Charsets.UTF_8))
+    private fun text(field: Int, value: String) = bytesField(field, value.encodeToByteArray())
     private fun device() = text(3, "Pixel XL") + text(4, "Google") + varintField(5, 28)
-    fun create(title: String, seconds: Long = System.currentTimeMillis() / 1000, initialMediaKey: String? = null): ByteArray =
+    fun create(title: String, seconds: Long, initialMediaKey: String? = null): ByteArray =
         text(1, title) + varintField(2, seconds) + varintField(3, 1) +
             (initialMediaKey?.let { bytesField(4, bytesField(1, text(1, it))) } ?: byteArrayOf()) + bytesField(6, byteArrayOf()) +
             bytesField(7, varintField(1, 3)) + bytesField(8, device())
-    fun add(albumId: String, key: String, seconds: Long = System.currentTimeMillis() / 1000): ByteArray {
+    fun add(albumId: String, key: String, seconds: Long): ByteArray {
         require(albumId.isNotBlank() && key.isNotBlank() && albumId.length <= 4096 && key.length <= 4096)
         return text(1, key) + text(2, albumId) + bytesField(5, varintField(1, 2)) +
             bytesField(6, device()) + varintField(7, seconds)

@@ -2,18 +2,10 @@ package gay.benjifox.foxyphotos.provider.google
 
 import gay.benjifox.foxyphotos.core.model.LibraryItem
 import gay.benjifox.foxyphotos.core.model.LibraryPage
-import java.util.Base64
 
 /** Wire field mask observed in bclone f6ad6b63, api/protobuf.go; not an account response. */
 internal object GoogleLibraryProtocol {
-    private val template = Base64.getDecoder().decode("Cs0FCqsCClkKABoAIgAqDAoAEgAaACIAKgA6ADIAOgISAHoAggEAigEAmgEAogEAqgEGKgIaADIAygEA8gECEgD6AQCCAgCKAgIKAJICAKICAKoCALICALoCAMICAMoCACpSEhgSChoCEgAiBBIAIgAiBBICEAEqAhIAMAEaGhIEGgAiABoIEgAaBBABGgAiACoEEgIQAToAIgQSAhIAKhQKEBIEGgAiABoIEgAaBBABGgAYAUIASjASABoECgASACImCiQaHAoaCggqAgoAMgA6ABIAGgwKCCoCCgAyADoAEgAiBAoCEgBaDBIAGgAiBhIECAEQAmIAcgwSABoAIgYSBAgBEAJ6BAoAIgCKAQQKACIAmgEMEgAaACIGEgQIARACqgECCgCyAQC6AQDCAQAShQEKKxIAGgAiACoAMgwKABIAGgAiACoAOgA6AEIAUgBiAGoEEgAaAHoCCgCSAQAiAgoASgBaDAoKCgAiACoAMgBKAHIkCiIKHgoAEggSBgoCCgAaABoQIgYKAgoAGgAqBgoCCgAaABIAigEAkgEGCgASAgoAogEGEgQKABIAsgEAugEAwgEAGsgBEgAaYhIAGgA6AEIAcgIKAIIBAIoBAhIAkgEAmgEAogEAqgEAsgEAugEA2gEGCgASAgoA6gEA8gEA+gEAggIAkgIAqgIAsgIAugIAygIA2gICCgDqAgQKAgoA8gIGCgASABoA+gIAIgwSABoCCgAiACoCCgA6AGIAagByHAoAEgwKABICCgAaACICCgAaCgoAEgIKABoAIgB6AIIBAgoAkgEAmgEUIgISADIEEgAaADoEEgAaAEIASgCiAQCyAQDCAQDKAQDSAQAyADgCSioKBhIECgASABIEGgIQARoCEgAiADoCCgBCCggCEgYBAgMFBgdKAFoCCgBYAVgCWAZiDBIECgASABoCCgAiAGoAegQaAggBEgwKCgoGCgIKABIAEgA=")
-    fun request(cursor: String?): ByteArray {
-        if (cursor == null) return template.copyOf()
-        require(cursor.length <= 16384)
-        val root = GoogleNativeProtocol.ProtoFields(template)
-        return GoogleNativeProtocol.bytesField(1, root.bytes(1)!! + GoogleNativeProtocol.bytesField(4, cursor.toByteArray())) +
-            GoogleNativeProtocol.bytesField(2, root.bytes(2)!!)
-    }
+    fun request(cursor: String?): ByteArray = GoogleAlbumListRequest.request(cursor)
     fun decode(bytes: ByteArray): LibraryPage {
         val container = GoogleNativeProtocol.ProtoFields(bytes).message(1)
             ?: throw GoogleProtocolException("Google library response has no container.")
