@@ -12,21 +12,34 @@ private struct PhotoAlbum: Identifiable, Sendable {
 }
 
 /** PhotoKit queries may be slow on large libraries; never call this on the main actor. */
-private func scanAlbums() -> [PhotoAlbum] {
+private func scanAlbums(progress: @escaping (Int, Int) -> Void) -> [PhotoAlbum] {
     let imageOptions = PHFetchOptions()
     imageOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
     let videoOptions = PHFetchOptions()
     videoOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
 
+    let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
+    let total = 2 + 2 * collections.count // One PhotoKit fetch per media type and album.
+    var completed = 0
+    progress(completed, total)
+    let cameraImages = PHAsset.fetchAssets(with: .image, options: nil).count
+    completed += 1
+    progress(completed, total)
+    let cameraVideos = PHAsset.fetchAssets(with: .video, options: nil).count
+    completed += 1
+    progress(completed, total)
     let cameraRoll = PhotoAlbum(id: PhotoAlbum.cameraRollId,
                                 title: "Camera Roll",
-                                imageCount: PHAsset.fetchAssets(with: .image, options: nil).count,
-                                videoCount: PHAsset.fetchAssets(with: .video, options: nil).count)
+                                imageCount: cameraImages,
+                                videoCount: cameraVideos)
     var userAlbums: [PhotoAlbum] = []
-    let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
     collections.enumerateObjects { collection, _, _ in
         let imageCount = PHAsset.fetchAssets(in: collection, options: imageOptions).count
+        completed += 1
+        progress(completed, total)
         let videoCount = PHAsset.fetchAssets(in: collection, options: videoOptions).count
+        completed += 1
+        progress(completed, total)
         if imageCount + videoCount > 0 {
             userAlbums.append(PhotoAlbum(id: collection.localIdentifier,
                                          title: collection.localizedTitle ?? "Album",
@@ -44,6 +57,7 @@ private final class PhotoSelection: ObservableObject {
     @Published var albums: [PhotoAlbum] = []
     @Published var selected: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "selected-albums") ?? [])
     @Published private(set) var isRefreshing = false
+    @Published private(set) var scanProgress = 0.0
 
     var hasAccess: Bool { access == .authorized || access == .limited }
 
@@ -61,8 +75,18 @@ private final class PhotoSelection: ObservableObject {
         guard hasAccess else { albums = []; return }
         guard !isRefreshing else { return }
         isRefreshing = true
+        scanProgress = 0
         Task { [weak self] in
-            let loaded = await Task.detached(priority: .userInitiated) { scanAlbums() }.value
+            let loaded = await Task.detached(priority: .userInitiated) { [weak self] in
+                scanAlbums { completed, total in
+                    // Bound UI updates even for libraries with thousands of albums.
+                    guard completed == 0 || completed == total || completed % max(1, total / 100) == 0 else { return }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.isRefreshing else { return }
+                        self.scanProgress = Double(completed) / Double(total)
+                    }
+                }
+            }.value
             guard let self else { return }
             defer { self.isRefreshing = false }
             // Permission can change while PhotoKit is scanning.
@@ -110,7 +134,7 @@ struct ContentView: View {
                     }
                     Section("Albums to back up") {
                         if selection.isRefreshing {
-                            ProgressView("Loading albums…")
+                            ProgressView("Loading albums… \(Int(selection.scanProgress * 100))%", value: selection.scanProgress, total: 1)
                                 .progressViewStyle(.linear)
                         }
                         if selection.albums.isEmpty && !selection.isRefreshing {
