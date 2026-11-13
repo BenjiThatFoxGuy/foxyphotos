@@ -2,7 +2,7 @@ import Photos
 import SwiftUI
 import UIKit
 
-private struct PhotoAlbum: Identifiable {
+private struct PhotoAlbum: Identifiable, Sendable {
     static let cameraRollId = "foxyphotos:camera-roll"
 
     let id: String
@@ -11,11 +11,39 @@ private struct PhotoAlbum: Identifiable {
     let videoCount: Int
 }
 
+/** PhotoKit queries may be slow on large libraries; never call this on the main actor. */
+private func scanAlbums() -> [PhotoAlbum] {
+    let imageOptions = PHFetchOptions()
+    imageOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+    let videoOptions = PHFetchOptions()
+    videoOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
+
+    let cameraRoll = PhotoAlbum(id: PhotoAlbum.cameraRollId,
+                                title: "Camera Roll",
+                                imageCount: PHAsset.fetchAssets(with: .image, options: nil).count,
+                                videoCount: PHAsset.fetchAssets(with: .video, options: nil).count)
+    var userAlbums: [PhotoAlbum] = []
+    let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
+    collections.enumerateObjects { collection, _, _ in
+        let imageCount = PHAsset.fetchAssets(in: collection, options: imageOptions).count
+        let videoCount = PHAsset.fetchAssets(in: collection, options: videoOptions).count
+        if imageCount + videoCount > 0 {
+            userAlbums.append(PhotoAlbum(id: collection.localIdentifier,
+                                         title: collection.localizedTitle ?? "Album",
+                                         imageCount: imageCount, videoCount: videoCount))
+        }
+    }
+    return [cameraRoll] + userAlbums.sorted {
+        $0.title.localizedStandardCompare($1.title) == .orderedAscending
+    }
+}
+
 @MainActor
 private final class PhotoSelection: ObservableObject {
     @Published var access: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     @Published var albums: [PhotoAlbum] = []
     @Published var selected: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "selected-albums") ?? [])
+    @Published private(set) var isRefreshing = false
 
     var hasAccess: Bool { access == .authorized || access == .limited }
 
@@ -31,36 +59,20 @@ private final class PhotoSelection: ObservableObject {
     func refresh() {
         access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard hasAccess else { albums = []; return }
-        let imageOptions = PHFetchOptions()
-        imageOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-        let videoOptions = PHFetchOptions()
-        videoOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
-
-        // Camera Roll represents the entire accessible library. User albums are
-        // overlapping views, not separate copies of their assets.
-        let cameraRoll = PhotoAlbum(id: PhotoAlbum.cameraRollId,
-                                    title: "Camera Roll",
-                                    imageCount: PHAsset.fetchAssets(with: .image, options: nil).count,
-                                    videoCount: PHAsset.fetchAssets(with: .video, options: nil).count)
-        var userAlbums: [PhotoAlbum] = []
-        let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
-        collections.enumerateObjects { collection, _, _ in
-            let imageCount = PHAsset.fetchAssets(in: collection, options: imageOptions).count
-            let videoCount = PHAsset.fetchAssets(in: collection, options: videoOptions).count
-            if imageCount + videoCount > 0 {
-                userAlbums.append(PhotoAlbum(id: collection.localIdentifier,
-                                             title: collection.localizedTitle ?? "Album",
-                                             imageCount: imageCount, videoCount: videoCount))
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) { scanAlbums() }.value
+            guard let self else { return }
+            defer { self.isRefreshing = false }
+            // Permission can change while PhotoKit is scanning.
+            self.access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            guard self.hasAccess else { self.albums = []; return }
+            self.albums = loaded
+            if UserDefaults.standard.object(forKey: "selected-albums") == nil {
+                self.selected = [PhotoAlbum.cameraRollId]
+                UserDefaults.standard.set([PhotoAlbum.cameraRollId], forKey: "selected-albums")
             }
-        }
-        albums = [cameraRoll] + userAlbums.sorted {
-            $0.title.localizedStandardCompare($1.title) == .orderedAscending
-        }
-        // A fresh install starts with Camera Roll; an intentionally empty
-        // selection remains empty across relaunches and permission changes.
-        if UserDefaults.standard.object(forKey: "selected-albums") == nil {
-            selected = [PhotoAlbum.cameraRollId]
-            UserDefaults.standard.set([PhotoAlbum.cameraRollId], forKey: "selected-albums")
         }
     }
 
@@ -97,7 +109,11 @@ struct ContentView: View {
                         }
                     }
                     Section("Albums to back up") {
-                        if selection.albums.isEmpty {
+                        if selection.isRefreshing {
+                            ProgressView("Loading albums…")
+                                .progressViewStyle(.linear)
+                        }
+                        if selection.albums.isEmpty && !selection.isRefreshing {
                             Text("No accessible albums found.").foregroundStyle(.secondary)
                         }
                         ForEach(selection.albums) { album in
@@ -133,6 +149,7 @@ struct ContentView: View {
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
+                    .disabled(selection.isRefreshing)
                 }
             }
             .onAppear { selection.refresh() }
