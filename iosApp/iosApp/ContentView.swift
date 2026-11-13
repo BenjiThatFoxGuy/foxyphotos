@@ -183,7 +183,7 @@ struct ContentView: View {
                     Section("Backup") {
                         Toggle("Delete confirmed originals after backup", isOn: $deleteConfirmedOriginals)
                             .disabled(isBackingUp)
-                        Text("Only originals confirmed by Google and saved in the backup ledger qualify. iOS will ask before deleting them.")
+                        Text("iOS will confirm deletion of simple originals only, after Google confirms and the receipt is saved. Live Photos and edited assets are kept.")
                             .font(.footnote).foregroundStyle(.secondary)
                         Button("Back up selected albums") { startBackup() }
                             .disabled(isBackingUp || selection.isRefreshing || !credentialConfigured || selection.selected.isEmpty)
@@ -284,6 +284,9 @@ struct ContentView: View {
                     backupStatus! += result.deletionSucceeded
                         ? " \(result.deletionRequested) originals deleted with iOS approval."
                         : " Original deletion wasn't completed; confirmed backups remain saved."
+                }
+                if result.deletionIneligible > 0 {
+                    backupStatus! += " \(result.deletionIneligible) complex assets kept on device."
                 }
             } catch is CancellationError {
                 backupStatus = "Backup cancelled. Confirmed receipts are saved; no deletion was started."

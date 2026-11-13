@@ -9,6 +9,7 @@ struct BackupResult {
     let failed: Int
     let deletionRequested: Int
     let deletionSucceeded: Bool
+    let deletionIneligible: Int
 }
 
 private struct StagedAsset {
@@ -18,6 +19,7 @@ private struct StagedAsset {
     let sha1: String
     let sha256: String
     let modifiedSeconds: Int64
+    let safeToDelete: Bool
 }
 
 private enum BackupFailure: Error { case unavailable, noOriginal, emptyResource, missingCredential }
@@ -48,6 +50,9 @@ private func stage(_ asset: PHAsset) async throws -> StagedAsset {
     guard let resource = wanted.compactMap({ type in resources.first { $0.type == type } }).first else {
         throw BackupFailure.noOriginal
     }
+    // Live Photos, edits and multi-resource assets contain more than this staged
+    // original. Upload the primary resource, but never offer deleting the asset.
+    let safeToDelete = resources.count == 1 && !asset.mediaSubtypes.contains(.photoLive)
     let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     do {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -77,7 +82,8 @@ private func stage(_ asset: PHAsset) async throws -> StagedAsset {
                 size: size,
                 sha1: sha1.finalize().map { String(format: "%02x", $0) }.joined(),
                 sha256: sha256.finalize().map { String(format: "%02x", $0) }.joined(),
-                modifiedSeconds: Int64((asset.modificationDate ?? asset.creationDate ?? Date()).timeIntervalSince1970)
+                modifiedSeconds: Int64((asset.modificationDate ?? asset.creationDate ?? Date()).timeIntervalSince1970),
+                safeToDelete: safeToDelete
             )
         }.value
     } catch {
@@ -128,7 +134,7 @@ final class IOSBackupSession {
         }
         let journal = try BackupReceipts(credential: credential)
         let assets = await Task.detached(priority: .userInitiated) { selectedAssets(selected) }.value
-        var confirmed = 0, skipped = 0, failed = 0
+        var confirmed = 0, skipped = 0, failed = 0, deletionIneligible = 0
         var deletionCandidates: [PHAsset] = []
         let bridge = GoogleUploadBridge(transport: transport)
         for asset in assets {
@@ -146,7 +152,10 @@ final class IOSBackupSession {
                     )
                     try journal.record(staged.sha256, providerKey: receipt.mediaKey)
                     confirmed += 1
-                    if deleteConfirmed { deletionCandidates.append(asset) }
+                    if deleteConfirmed {
+                        if staged.safeToDelete { deletionCandidates.append(asset) }
+                        else { deletionIneligible += 1 }
+                    }
                 }
             } catch is CancellationError { throw CancellationError() }
             catch { failed += 1 } // A failed or uncertain item never enters cleanup.
@@ -155,6 +164,22 @@ final class IOSBackupSession {
         var deleted = false
         if deleteConfirmed && !deletionCandidates.isEmpty {
             try Task.checkCancellation()
+            // Recheck just before the destructive transaction. An asset edited or
+            // expanded while its original uploaded is not the original we confirmed.
+            let safeCandidates = deletionCandidates.compactMap { asset -> PHAsset? in
+                guard let current = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil).firstObject,
+                      current.modificationDate == asset.modificationDate,
+                      PHAssetResource.assetResources(for: current).count == 1,
+                      !current.mediaSubtypes.contains(.photoLive) else { return nil }
+                return current
+            }
+            deletionIneligible += deletionCandidates.count - safeCandidates.count
+            deletionCandidates = safeCandidates
+            guard !deletionCandidates.isEmpty else {
+                return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
+                                    deletionRequested: 0, deletionSucceeded: false,
+                                    deletionIneligible: deletionIneligible)
+            }
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     PHPhotoLibrary.shared().performChanges({
@@ -168,6 +193,7 @@ final class IOSBackupSession {
             } catch { /* Receipts remain durable; surface failed deletion separately. */ }
         }
         return BackupResult(confirmed: confirmed, skipped: skipped, failed: failed,
-                            deletionRequested: deletionCandidates.count, deletionSucceeded: deleted)
+                            deletionRequested: deletionCandidates.count, deletionSucceeded: deleted,
+                            deletionIneligible: deletionIneligible)
     }
 }
