@@ -2,9 +2,18 @@ import Foundation
 import FoxyPhotosGoogleCore
 
 /// Native file streaming only. Auth, duplicate check, upload and commit live in shared Kotlin.
-final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport {
+final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport, URLSessionTaskDelegate {
     private let lock = NSLock()
+    private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
     private var activeTask: URLSessionTask?
+
+    // Never forward a bearer or auth-form request to a redirect target.
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
 
     func send(request: GoogleHttpRequest, completion: GoogleHttpCompletion) {
         guard let url = URL(string: request.url),
@@ -35,13 +44,13 @@ final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport {
         }
         let task: URLSessionTask
         if let path = request.originalFilePath {
-            task = URLSession.shared.uploadTask(with: outgoing, fromFile: URL(fileURLWithPath: path), completionHandler: done)
+            task = session.uploadTask(with: outgoing, fromFile: URL(fileURLWithPath: path), completionHandler: done)
         } else {
             guard let encoded = request.bodyBase64, let body = Data(base64Encoded: encoded) else {
                 completion.complete(response: nil, error: "Invalid request body")
                 return
             }
-            task = URLSession.shared.uploadTask(with: outgoing, from: body, completionHandler: done)
+            task = session.uploadTask(with: outgoing, from: body, completionHandler: done)
         }
         lock.lock()
         activeTask = task

@@ -1,0 +1,53 @@
+package gay.benjifox.foxyphotos.provider.google
+
+/** Shared Google album protocol. HTTP acknowledgement is not membership confirmation. */
+class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
+    private val provider = GoogleUploadSequence(transport)
+    private val libraryEndpoint = "https://photosdata-pa.googleapis.com/6439526531001121323/18047484249733410717"
+    private val createEndpoint = "https://photosdata-pa.googleapis.com/6439526531001121323/8386163679468898444"
+    private val addEndpoint = "https://photosdata-pa.googleapis.com/6439526531001121323/484917746253879292"
+
+    @Throws(Exception::class)
+    suspend fun list(credentialForm: String): List<GoogleAlbum> {
+        val albums = mutableListOf<GoogleAlbum>()
+        val cursors = mutableSetOf<String>()
+        var cursor: String? = null
+        repeat(10) {
+            val page = GoogleAlbumProtocol.decode(post(credentialForm, libraryEndpoint, GoogleAlbumListRequest.request(cursor)))
+            albums += page.albums
+            require(albums.size <= 5000) { "Incomplete album listing." }
+            cursor = page.nextCursor
+            if (cursor == null) {
+                require(albums.groupBy { it.id }.values.all { entries -> entries.distinct().size == 1 })
+                return albums.distinctBy { it.id }
+            }
+            require(cursors.add(cursor!!)) { "Repeated album page." }
+        }
+        throw GoogleUploadSequenceException("Incomplete album listing.")
+    }
+
+    @Throws(Exception::class)
+    suspend fun create(credentialForm: String, title: String, nowSeconds: Long): String {
+        require(title.isNotBlank() && title.length <= 500)
+        // No initial member. Creation and membership are separately journaled writes.
+        val response = post(credentialForm, createEndpoint, GoogleAlbumProtocol.create(title, nowSeconds))
+        return GoogleAlbumProtocol.createdId(response)
+    }
+
+    @Throws(Exception::class)
+    suspend fun add(credentialForm: String, albumId: String, mediaKey: String, nowSeconds: Long) {
+        post(credentialForm, addEndpoint, GoogleAlbumProtocol.add(albumId, mediaKey, nowSeconds))
+    }
+
+    private suspend fun post(credentialForm: String, endpoint: String, body: ByteArray): ByteArray {
+        val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
+        return provider.send(GoogleHttpRequest(endpoint, "POST", mapOf(
+            "Authorization" to auth,
+            "User-Agent" to "Google Photos/49029607 (Pixel XL; Android 9)",
+            "Accept-Language" to "en-US",
+            "Content-Type" to "application/x-protobuf",
+            "X-Goog-Ext-173412678-Bin" to "CgcIAhClARgC",
+            "X-Goog-Ext-174067345-Bin" to "CgIIAg==",
+        ), body)).body
+    }
+}
