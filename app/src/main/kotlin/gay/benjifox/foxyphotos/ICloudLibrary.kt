@@ -12,7 +12,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import gay.benjifox.foxyphotos.core.model.*
 import gay.benjifox.foxyphotos.core.security.AndroidKeystoreCredentialStore
-import gay.benjifox.foxyphotos.provider.contract.CredentialReference
 import gay.benjifox.foxyphotos.provider.icloud.*
 import kotlinx.coroutines.*
 
@@ -145,14 +144,7 @@ internal fun ICloudLibraryControls(state: ICloudSourceState) {
         try {
             val stored = withContext(Dispatchers.IO) { repository.load() }
             if (stored == null) {
-                val credential = AndroidKeystoreCredentialStore(context.applicationContext)
-                    .loadCredential(CredentialReference("google-native"))
-                    ?.decodeToString()
-                if (credential != null) {
-                    status = "iCloud session expired. Import a renewed session in Settings and reopen this view. Loaded items and backup queues are kept."
-                } else {
-                    status = "iCloud not configured. Import a session file in Settings. Local only mode is active."
-                }
+                status = "iCloud not configured. Import a session file in Settings."
             } else {
                 client = ICloudLibraryClient(stored) { updated -> withContext(Dispatchers.IO) { repository.save(updated) } }
                 state.preview = GooglePreviewSession(client!!)

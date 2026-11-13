@@ -391,8 +391,8 @@ private fun FoxyPhotosApp() {
                                 LocalGallery(Modifier.fillMaxSize(), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
                             }
                         } else if (libraryMode == gay.benjifox.foxyphotos.core.model.LibraryMode.ICLOUD_ONLY) {
-                            // iCloud-only: show iCloud browsing, no Google references
-                            ICloudSessionSetup()
+                            // iCloud-only: browse iCloud Photos, with no Google or local references.
+                            ICloudLibraryControls(remember { ICloudSourceState() })
                         } else {
                             CombinedLibrary(
                                 onPermission = { permissionLauncher.launch(requiredPermissions) },
