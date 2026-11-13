@@ -165,18 +165,22 @@ private final class BackupReceipts {
 /// Keeps source deletion in the same run, after provider confirmation AND durable receipt.
 final class IOSBackupSession {
     private let transport = GoogleURLSessionTransport()
-    func cancel() { transport.cancelActive() }
+    private let albumTransport = GoogleURLSessionTransport()
+    func cancel() {
+        transport.cancelActive()
+        albumTransport.cancelActive()
+    }
 
     func run(selected: Set<String>, albumNames: [String: String], pickedIds: [String]? = nil,
              deleteConfirmed: Bool,
-             progress: @escaping (Int, Int, Int) async -> Void) async throws -> BackupResult {
+             progress: @escaping (Int, Int, Int, String) async -> Void) async throws -> BackupResult {
         guard let credentialData = GoogleCredentialStore.load(),
               let credential = String(data: credentialData, encoding: .utf8) else {
             throw BackupFailure.missingCredential
         }
         let journal = try BackupReceipts(credential: credential)
         let albumJournal = try IOSAlbumJournal(credential: credential)
-        let albumBridge = GoogleAlbumBridge(transport: transport)
+        let albumBridge = GoogleAlbumBridge(transport: albumTransport)
         // Read-only album discovery can run while PhotoKit stages the first original.
         async let initialAlbumListing: GoogleAlbumListing? = try? await albumBridge.listDiagnosed(credentialForm: credential)
         var remoteAlbums: [GoogleAlbum]?
@@ -197,12 +201,16 @@ final class IOSBackupSession {
         }
         var deletionCandidates: [PHAsset] = []
         let bridge = GoogleUploadBridge(transport: transport)
-        for selectedAsset in assets {
+        for (index, selectedAsset) in assets.enumerated() {
             let asset = selectedAsset.asset
             try Task.checkCancellation()
+            await progress(confirmed + skipped + failed, assets.count, failed,
+                           "Fetching original \(index + 1) of \(assets.count)…")
             do {
                 let staged = try await stage(asset)
                 defer { try? FileManager.default.removeItem(at: staged.url) }
+                await progress(confirmed + skipped + failed, assets.count, failed,
+                               "Confirming original \(index + 1) of \(assets.count)…")
                 let mediaKey: String
                 if let existing = journal.mediaKey(staged.sha256), !existing.isEmpty {
                     skipped += 1
@@ -221,13 +229,16 @@ final class IOSBackupSession {
                         else { deletionIneligible += 1 }
                     }
                 }
+                await progress(confirmed + skipped + failed, assets.count, failed,
+                               "Finding matching Google albums…")
                 if !albumListingLoaded {
                     let listing = await initialAlbumListing
                     remoteAlbums = listing?.albums
                     listingIssue = listing?.issue ?? listingIssue
                     albumListingLoaded = true
                 }
-                if remoteAlbums == nil && !retriedAlbumList {
+                if remoteAlbums == nil && !retriedAlbumList &&
+                    (listingIssue == "Google listing request failed" || listingIssue.hasPrefix("Google listing Provider returned HTTP 5")) {
                     retriedAlbumList = true
                     let listing = try? await albumBridge.listDiagnosed(credentialForm: credential)
                     remoteAlbums = listing?.albums
@@ -255,7 +266,8 @@ final class IOSBackupSession {
                 }
             } catch is CancellationError { throw CancellationError() }
             catch { failed += 1 } // A failed or uncertain item never enters cleanup.
-            await progress(confirmed + skipped + failed, assets.count, failed)
+            await progress(confirmed + skipped + failed, assets.count, failed,
+                           "Checked \(confirmed + skipped + failed) of \(assets.count) · \(failed) failed")
         }
         var deleted = false
         if deleteConfirmed && !deletionCandidates.isEmpty {

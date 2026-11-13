@@ -311,10 +311,10 @@ struct ContentView: View {
         backupTask = Task {
             do {
                 let result = try await session.run(selected: chosen, albumNames: albumNames,
-                                                   pickedIds: pickedIds, deleteConfirmed: shouldDelete) { completed, total, failed in
+                                                   pickedIds: pickedIds, deleteConfirmed: shouldDelete) { completed, total, failed, phase in
                     await MainActor.run {
                         backupProgress = total == 0 ? 1 : Double(completed) / Double(total)
-                        backupStatus = "Checked \(completed) of \(total) · \(failed) failed"
+                        backupStatus = phase
                     }
                 }
                 backupProgress = 1

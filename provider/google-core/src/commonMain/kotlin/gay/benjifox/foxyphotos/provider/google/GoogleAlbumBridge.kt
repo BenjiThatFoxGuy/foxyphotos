@@ -1,5 +1,9 @@
 package gay.benjifox.foxyphotos.provider.google
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+
 data class GoogleAlbumListing(val albums: List<GoogleAlbum>?, val issue: String?)
 
 /** Shared Google album protocol. HTTP acknowledgement is not membership confirmation. */
@@ -30,8 +34,15 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     }
 
     /** A bounded, credential-free failure reason for the device status panel. */
-    suspend fun listDiagnosed(credentialForm: String): GoogleAlbumListing = try {
-        GoogleAlbumListing(list(credentialForm), null)
+    suspend fun listDiagnosed(credentialForm: String): GoogleAlbumListing =
+        listDiagnosedWithin(credentialForm, 45_000)
+
+    internal suspend fun listDiagnosedWithin(credentialForm: String, timeoutMillis: Long): GoogleAlbumListing = try {
+        GoogleAlbumListing(withTimeout(timeoutMillis) { list(credentialForm) }, null)
+    } catch (_: TimeoutCancellationException) {
+        GoogleAlbumListing(null, "Google album listing timed out")
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: GoogleUploadSequenceException) {
         val message = e.message.orEmpty()
         GoogleAlbumListing(null, if (message.startsWith("Provider returned HTTP ") &&
