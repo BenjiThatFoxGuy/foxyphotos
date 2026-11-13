@@ -27,6 +27,7 @@ include(
     ":core:security",
     ":provider:contract",
     ":provider:foundation",
+    ":provider:google-core",
     ":provider:google-native",
     ":provider:icloud",
     ":feature:library",

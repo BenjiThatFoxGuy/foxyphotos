@@ -1,10 +1,7 @@
 package gay.benjifox.foxyphotos.provider.google
 
-import java.io.ByteArrayOutputStream
-import java.nio.charset.StandardCharsets
-
 /** Minimal protobuf wire codec for the bclone-observed Google Photos upload flow. */
-internal object GoogleNativeProtocol {
+object GoogleNativeProtocol {
     const val hashCheckEndpoint =
         "https://photosdata-pa.googleapis.com/6439526531001121323/5084965799730810217"
     const val uploadEndpoint = "https://photos.googleapis.com/data/upload/uploadmedia/interactive"
@@ -35,13 +32,13 @@ internal object GoogleNativeProtocol {
         val tokenMessage = varintField(1, token.number) + bytesField(2, token.opaque)
         val timestamp = varintField(1, modifiedEpochSeconds) + varintField(2, 46_000_000)
         val commit = bytesField(1, tokenMessage) +
-            bytesField(2, fileName.toByteArray(StandardCharsets.UTF_8)) +
+            bytesField(2, fileName.encodeToByteArray()) +
             bytesField(3, sha1) +
             bytesField(4, timestamp) +
             varintField(7, 3) +
             varintField(10, 1)
-        val device = bytesField(3, "Pixel XL".toByteArray(StandardCharsets.UTF_8)) +
-            bytesField(4, "Google".toByteArray(StandardCharsets.UTF_8)) +
+        val device = bytesField(3, "Pixel XL".encodeToByteArray()) +
+            bytesField(4, "Google".encodeToByteArray()) +
             varintField(5, 28)
         return bytesField(1, commit) + bytesField(2, device) + bytesField(3, byteArrayOf(1, 3))
     }
@@ -61,7 +58,7 @@ internal object GoogleNativeProtocol {
         ProtoFields(response).message(1)?.message(3)?.string(1)?.takeIf(String::isNotBlank)
             ?: throw GoogleProtocolException("Google commit response is missing a media key.")
 
-    internal class ProtoFields(data: ByteArray) {
+    class ProtoFields(data: ByteArray) {
         private val fields = mutableMapOf<Int, MutableList<Any>>()
 
         init {
@@ -93,7 +90,7 @@ internal object GoogleNativeProtocol {
         fun varint(field: Int): Long? = fields[field]?.lastOrNull() as? Long
         fun bytes(field: Int): ByteArray? = fields[field]?.lastOrNull() as? ByteArray
         fun message(field: Int): ProtoFields? = bytes(field)?.let(::ProtoFields)
-        fun string(field: Int): String? = bytes(field)?.toString(StandardCharsets.UTF_8)
+        fun string(field: Int): String? = bytes(field)?.decodeToString()
     }
 
     private fun readVarint(data: ByteArray, start: Int): Pair<Long, Int> {
@@ -109,26 +106,25 @@ internal object GoogleNativeProtocol {
         throw GoogleProtocolException("Malformed Google protobuf response.")
     }
 
-    internal fun varintField(field: Int, value: Long): ByteArray =
+    fun varintField(field: Int, value: Long): ByteArray =
         encodeVarint((field shl 3).toLong()) + encodeVarint(value)
 
-    internal fun bytesField(field: Int, value: ByteArray): ByteArray =
+    fun bytesField(field: Int, value: ByteArray): ByteArray =
         encodeVarint(((field shl 3) or 2).toLong()) + encodeVarint(value.size.toLong()) + value
 
     private fun encodeVarint(value: Long): ByteArray {
         require(value >= 0) { "Protocol varints must be non-negative." }
         var remaining = value
-        return ByteArrayOutputStream().use { output ->
-            while (remaining and 0x7f.inv().toLong() != 0L) {
-                output.write((remaining and 0x7f).toInt() or 0x80)
-                remaining = remaining ushr 7
-            }
-            output.write(remaining.toInt())
-            output.toByteArray()
+        val output = mutableListOf<Byte>()
+        while (remaining and 0x7f.inv().toLong() != 0L) {
+            output.add(((remaining and 0x7f).toInt() or 0x80).toByte())
+            remaining = remaining ushr 7
         }
+        output.add(remaining.toByte())
+        return output.toByteArray()
     }
 }
 
-internal data class GoogleCommitToken(val number: Long, val opaque: ByteArray)
+data class GoogleCommitToken(val number: Long, val opaque: ByteArray)
 
-internal class GoogleProtocolException(message: String) : IllegalStateException(message)
+class GoogleProtocolException(message: String) : IllegalStateException(message)

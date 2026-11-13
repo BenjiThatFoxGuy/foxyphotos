@@ -37,6 +37,7 @@ jobs:
             :core:backup:linkDebugFrameworkIosSimulatorArm64 \
             :provider:contract:linkDebugFrameworkIosSimulatorArm64 \
             :provider:foundation:linkDebugFrameworkIosSimulatorArm64 \
+            :provider:google-core:compileKotlinIosSimulatorArm64 \
             --stacktrace
 
       - name: Install XcodeGen
@@ -89,6 +90,7 @@ jobs:
             :core:backup:linkDebugFrameworkIosArm64 \
             :provider:contract:linkDebugFrameworkIosArm64 \
             :provider:foundation:linkDebugFrameworkIosArm64 \
+            :provider:google-core:compileKotlinIosArm64 \
             --stacktrace
 
       - name: Install XcodeGen
