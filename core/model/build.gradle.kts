@@ -27,6 +27,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":core:platform"))
+            implementation(libs.kotlinx.coroutines.core)
         }
         jvmTest.dependencies {
             implementation(libs.junit)
