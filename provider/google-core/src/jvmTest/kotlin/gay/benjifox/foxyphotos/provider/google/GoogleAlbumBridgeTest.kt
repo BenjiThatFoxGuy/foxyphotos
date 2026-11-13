@@ -57,7 +57,7 @@ class GoogleAlbumBridgeTest {
                 if (request.url == "https://android.googleapis.com/auth") {
                     completion.complete(response("Auth=bearer\n".encodeToByteArray()), null)
                 } else {
-                    completion.complete(response: null, error: "Provider transport failed: The Internet connection appears to be offline.")
+                    completion.complete(null, "Provider transport failed: The Internet connection appears to be offline.")
                 }
             }
             override fun cancelActive() = Unit
