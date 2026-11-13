@@ -44,10 +44,12 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     } catch (e: CancellationException) {
         throw e
     } catch (e: GoogleUploadSequenceException) {
-        val message = e.message.orEmpty()
-        GoogleAlbumListing(null, if (message.startsWith("Provider returned HTTP ") &&
-            message.removePrefix("Provider returned HTTP ").removeSuffix(".").all { it.isDigit() })
-            "Google listing ${message.removeSuffix(".")}" else "Google listing request failed")
+        val message = e.message.orEmpty().take(200)
+        GoogleAlbumListing(null, when {
+            message.startsWith("Provider returned HTTP ") -> "Google listing ${message.removeSuffix(".")}"
+            message.isNotBlank() -> "Google listing $message"
+            else -> "Google listing request failed"
+        })
     } catch (_: Exception) {
         GoogleAlbumListing(null, "Google listing response could not be decoded")
     }

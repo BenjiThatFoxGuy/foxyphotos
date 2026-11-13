@@ -12,4 +12,14 @@ object GoogleAlbumListRequest {
             GoogleNativeProtocol.bytesField(4, cursor.encodeToByteArray())) +
             GoogleNativeProtocol.bytesField(2, root.bytes(2)!!)
     }
+
+    /** Delta refresh using the library sync token captured by a full listing. */
+    fun syncRequest(syncToken: String?): ByteArray {
+        if (syncToken.isNullOrEmpty()) return request(null)
+        require(syncToken.length <= 16384)
+        val root = GoogleNativeProtocol.ProtoFields(template)
+        return GoogleNativeProtocol.bytesField(1, root.bytes(1)!! +
+            GoogleNativeProtocol.bytesField(6, syncToken.encodeToByteArray())) +
+            GoogleNativeProtocol.bytesField(2, root.bytes(2)!!)
+    }
 }

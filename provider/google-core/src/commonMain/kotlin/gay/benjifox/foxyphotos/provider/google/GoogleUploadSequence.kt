@@ -118,7 +118,8 @@ class GoogleUploadSequence(private val transport: GoogleHttpTransport) {
                 override fun complete(response: GoogleHttpResponse?, error: String?) {
                     when {
                         !continuation.isActive -> Unit
-                        error != null -> continuation.resumeWithException(GoogleUploadSequenceException("Provider transport failed."))
+                        error != null -> continuation.resumeWithException(
+                            GoogleUploadSequenceException(error.take(200)))
                         response == null -> continuation.resumeWithException(GoogleUploadSequenceException("Provider response missing."))
                         response.status !in 200..299 -> continuation.resumeWithException(
                             GoogleUploadSequenceException("Provider returned HTTP ${response.status}.")

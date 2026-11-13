@@ -51,6 +51,29 @@ class GoogleAlbumBridgeTest {
         assertEquals("Google listing Provider returned HTTP 503", result.issue)
     }
 
+    @Test fun `listing failure carries the underlying transport reason`() = runBlocking {
+        val failing = object : GoogleHttpTransport {
+            override fun send(request: GoogleHttpRequest, completion: GoogleHttpCompletion) {
+                if (request.url == "https://android.googleapis.com/auth") {
+                    completion.complete(response("Auth=bearer\n".encodeToByteArray()), null)
+                } else {
+                    completion.complete(response: null, error: "Provider transport failed: The Internet connection appears to be offline.")
+                }
+            }
+            override fun cancelActive() = Unit
+        }
+        val result = GoogleAlbumBridge(failing).listDiagnosed(credential)
+        assertNull(result.albums)
+        assertEquals("Google listing Provider transport failed: The Internet connection appears to be offline.", result.issue)
+    }
+
+    @Test fun `delta refresh request carries the library sync token`() {
+        val request = GoogleNativeProtocol.ProtoFields(GoogleAlbumListRequest.syncRequest("sync-1"))
+        assertEquals("sync-1", request.message(1)?.string(6))
+        assertEquals("", request.message(1)?.string(4))
+        assertEquals("", GoogleNativeProtocol.ProtoFields(GoogleAlbumListRequest.request(null)).message(1)?.string(6))
+    }
+
     @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {
         val hanging = object : GoogleHttpTransport {
             var cancelled = false

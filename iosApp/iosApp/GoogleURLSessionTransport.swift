@@ -4,15 +4,28 @@ import FoxyPhotosGoogleCore
 /// Native file streaming only. Auth, duplicate check, upload and commit live in shared Kotlin.
 final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport, URLSessionTaskDelegate {
     private let lock = NSLock()
-    private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+    private lazy var session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        // Album pages can be large and slow on a cold library; never let the
+        // default 60s request timeout abort a legitimate listing.
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 600
+        return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    }()
     private var activeTasks: [UUID: URLSessionTask] = [:]
 
-    // Never forward a bearer or auth-form request to a redirect target.
+    // Never forward a bearer or auth-form request to a non-Google redirect target.
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest,
                     completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(nil)
+        completionHandler(Self.allowsRedirects(request.url?.host) ? request : nil)
+    }
+
+    private static func allowsRedirects(_ host: String?) -> Bool {
+        guard let host = host?.lowercased() else { return false }
+        return host.hasSuffix("googleapis.com") || host.hasSuffix("google.com") ||
+            host.hasSuffix("googleusercontent.com")
     }
 
     func send(request: GoogleHttpRequest, completion: GoogleHttpCompletion) {
@@ -30,9 +43,17 @@ final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport, URLSession
             self?.lock.lock()
             self?.activeTasks.removeValue(forKey: token)
             self?.lock.unlock()
-            guard error == nil, let http = response as? HTTPURLResponse, let data,
-                  data.count <= 8 * 1024 * 1024 else {
-                completion.complete(response: nil, error: "Provider transport failed")
+            // Library pages carry every media item and album; uploads do not.
+            let responseLimit = url.host == "photosdata-pa.googleapis.com" ? 64 * 1024 * 1024 : 8 * 1024 * 1024
+            guard error == nil, let http = response as? HTTPURLResponse, let data else {
+                let reason: String
+                if let error { reason = "Provider transport failed: \(String(error.localizedDescription.prefix(200)))" }
+                else { reason = "Provider transport failed" }
+                completion.complete(response: nil, error: reason)
+                return
+            }
+            guard data.count <= responseLimit else {
+                completion.complete(response: nil, error: "Provider response too large: \(data.count) bytes")
                 return
             }
             var headers: [String: String] = [:]
