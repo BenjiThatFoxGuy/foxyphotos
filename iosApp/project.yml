@@ -30,11 +30,9 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
-        excludes:
-          - "LiveActivity"
-          - "LiveActivity/**"
+      - path: Shared/AlbumIndexAttributes.swift
     info:
-      path: iosApp/Info.plist
+      path: Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
         CFBundleDisplayName: FoxyPhotos
@@ -85,11 +83,9 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
-        excludes:
-          - "LiveActivity"
-          - "LiveActivity/**"
+      - path: Shared/AlbumIndexAttributes.swift
     info:
-      path: iosApp/Info.plist
+      path: Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
         CFBundleDisplayName: FoxyPhotos
@@ -140,10 +136,10 @@ targets:
     type: app-extension
     platform: iOS
     sources:
-      - path: iosApp/LiveActivity
-      - path: iosApp/Shared/AlbumIndexAttributes.swift
+      - path: LiveActivity
+      - path: Shared/AlbumIndexAttributes.swift
     info:
-      path: iosApp/LiveActivity/Info.plist
+      path: LiveActivity/Info.plist
       properties:
         CFBundleDisplayName: FoxyPhotos
         CFBundleExecutable: $(EXECUTABLE_NAME)
