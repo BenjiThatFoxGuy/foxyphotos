@@ -30,7 +30,7 @@ enum AlbumIndexActivity {
             guard let activity = current else { return }
             let state = AlbumIndexAttributes.ContentState(
                 phase: phase, completed: completed, total: total, failed: failed,
-                library: library, startedAt: activity.content.state.startedAt
+                library: library, startedAt: activity.contentState.startedAt
             )
             await activity.update(using: state)
         }
@@ -41,7 +41,7 @@ enum AlbumIndexActivity {
     static func end() {
         Task { @MainActor in
             guard let activity = current else { return }
-            let state = activity.content.state
+            let state = activity.contentState
             await activity.end(using: state, dismissalPolicy: .immediate)
             current = nil
         }
