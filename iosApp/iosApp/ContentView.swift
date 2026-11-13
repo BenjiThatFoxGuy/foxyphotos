@@ -109,6 +109,8 @@ private final class PhotoSelection: ObservableObject {
 struct ContentView: View {
     @StateObject private var selection = PhotoSelection()
     @State private var importingCredential = false
+    @State private var showingPrivatePicker = false
+    @State private var pickerReport: String?
     @State private var credentialInput = ""
     @State private var credentialConfigured = GoogleCredentialStore.isConfigured
     @State private var credentialError: String?
@@ -194,6 +196,16 @@ struct ContentView: View {
                         }
                     }
                 }
+                Section("Private picker test") {
+                    Button("Inspect a few photos with iOS picker") { showingPrivatePicker = true }
+                        .disabled(isBackingUp)
+                    Text("Debug only. This does not upload or delete anything. The report shows which filenames and albums iOS actually exposes.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if let pickerReport {
+                        Button("Copy picker report") { UIPasteboard.general.string = pickerReport }
+                        Text(pickerReport).font(.footnote).textSelection(.enabled)
+                    }
+                }
             }
             .navigationTitle("FoxyPhotos")
             .toolbar {
@@ -209,6 +221,12 @@ struct ContentView: View {
             .onAppear {
                 selection.refresh()
                 credentialConfigured = GoogleCredentialStore.isConfigured
+            }
+            .sheet(isPresented: $showingPrivatePicker) {
+                PrivatePhotoPicker { report in
+                    showingPrivatePicker = false
+                    if !report.isEmpty { pickerReport = report }
+                }
             }
             .sheet(isPresented: $importingCredential, onDismiss: {
                 credentialInput = ""
