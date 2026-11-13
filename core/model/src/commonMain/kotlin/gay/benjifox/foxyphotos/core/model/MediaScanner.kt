@@ -64,9 +64,16 @@ interface MediaScanner {
     /** List all folders/albums with their image and video counts. */
     suspend fun scanFolders(): List<MediaFolder>
 
-    /** Scan all media items in the selected folders. */
+    /**
+     * Scan the selected albums. An asset may belong to Camera Roll and one or
+     * more user albums; return each asset identifier only once per scan.
+     */
     suspend fun scanSelectedFolders(folderIds: Set<String>): List<LocalMediaItem>
 
     /** Hash a single media item, producing SHA-1 and SHA-256 digests. */
     suspend fun hash(media: LocalMediaItem): HashedMediaItem
 }
+
+/** Preserve scan order while admitting an asset only once across overlapping albums. */
+fun deduplicateMediaItems(items: Iterable<LocalMediaItem>): List<LocalMediaItem> =
+    items.distinctBy { it.identifier }
