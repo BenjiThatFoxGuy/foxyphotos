@@ -24,7 +24,11 @@ struct GoogleAlbumCache {
         let count: Int64?
         let webId: String?
 
-        func album() -> GoogleAlbum { GoogleAlbum(id: id, title: title, count: count, webId: webId) }
+        func album() -> GoogleAlbum {
+            GoogleAlbum(id: id, title: title,
+                        count: count.map { KotlinLong(value: $0) },
+                        webId: webId)
+        }
     }
 
     struct State: Codable, Equatable {
@@ -46,18 +50,23 @@ struct GoogleAlbumCache {
         guard let data = try? Data(contentsOf: fileURL),
               let state = try? decoder.decode(State.self, from: data),
               state.complete else { return nil }
-        return Snapshot(albums: state.albums.map(\.album), syncToken: state.syncToken, fetchedAt: state.fetchedAt)
+        return Snapshot(albums: state.albums.map { $0.album() },
+                        syncToken: state.syncToken,
+                        fetchedAt: state.fetchedAt)
     }
 
     func store(albums: [GoogleAlbum], syncToken: String?, fetchedAt: Date) {
         let state = State(
-            albums: albums.map { CachedAlbum(id: $0.id, title: $0.title, count: $0.count, webId: $0.webId) },
+            albums: albums.map { CachedAlbum(id: $0.id, title: $0.title,
+                                             count: $0.count?.int64Value,
+                                             webId: $0.webId) },
             syncToken: syncToken,
             fetchedAt: fetchedAt,
             complete: true
         )
         guard let data = try? encoder.encode(state) else { return }
-        try? data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        let options: Data.WritingOptions = [.atomic, .completeFileProtectionUnlessOpen]
+        try? data.write(to: fileURL, options: options)
     }
 
     func clear() { try? FileManager.default.removeItem(at: fileURL) }
