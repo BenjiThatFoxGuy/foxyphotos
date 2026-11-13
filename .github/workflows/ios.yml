@@ -61,3 +61,73 @@ jobs:
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=YES \
             build
+
+  # Produces the sideloadable artifact. Unsigned on purpose: AltStore re-signs it
+  # with the user's own Apple ID and provisioning profile, so no signing material
+  # ever leaves the device.
+  build-ipa:
+    name: Build sideloadable IPA
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build shared core for iOS device
+        run: |
+          ./gradlew \
+            :core:platform:linkDebugFrameworkIosArm64 \
+            :core:model:linkDebugFrameworkIosArm64 \
+            :core:backup:linkDebugFrameworkIosArm64 \
+            :provider:contract:linkDebugFrameworkIosArm64 \
+            :provider:foundation:linkDebugFrameworkIosArm64 \
+            --stacktrace
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          cd iosApp
+          xcodegen generate
+
+      - name: Archive the device app without signing
+        run: |
+          xcodebuild archive \
+            -project iosApp/FoxyPhotos.xcodeproj \
+            -scheme FoxyPhotosDevice \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -archivePath iosApp/build/FoxyPhotos.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      # An .ipa is just Payload/<App>.app zipped. ExportArchive needs a provisioning
+      # profile, so the archive is packaged by hand.
+      - name: Package the IPA
+        run: |
+          cd iosApp/build
+          rm -rf Payload FoxyPhotos.ipa
+          mkdir Payload
+          cp -r FoxyPhotos.xcarchive/Products/Applications/FoxyPhotos.app Payload/
+          find Payload/FoxyPhotos.app/Frameworks -type d -name "*.framework" \
+            -exec codesign --force --sign - --preserve-metadata=identifier,entitlements {} \; || true
+          zip -r FoxyPhotos.ipa Payload
+          ls -lh FoxyPhotos.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FoxyPhotos.ipa
+          path: iosApp/build/FoxyPhotos.ipa
+          if-no-files-found: error
