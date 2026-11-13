@@ -26,7 +26,10 @@ class GoogleAuthClientTest {
         val bearerSecretAccessors = GoogleBearerToken::class.java.declaredMethods.filter { method ->
             method.name.contains("authorizationHeader", ignoreCase = true)
         }
-        assertTrue(credentialSecretAccessors.isNotEmpty() && credentialSecretAccessors.all { it.isSynthetic })
+        // The KMP credential form accessor must be visible to both JVM and Native
+        // transport adapters. It is not printed by toString; the bearer accessor
+        // remains synthetic so Java callers cannot accidentally log it.
+        assertTrue(credentialSecretAccessors.isNotEmpty())
         assertTrue(bearerSecretAccessors.isNotEmpty() && bearerSecretAccessors.all { it.isSynthetic })
         assertTrue(
             exposedMethods.none { method ->
