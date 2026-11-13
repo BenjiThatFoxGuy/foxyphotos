@@ -4,7 +4,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
-data class GoogleAlbumListing(val albums: List<GoogleAlbum>?, val issue: String?)
+data class GoogleAlbumListing(val albums: List<GoogleAlbum>?, val issue: String?, val syncToken: String? = null)
+data class GoogleAlbumListingResult(val albums: List<GoogleAlbum>, val syncToken: String?)
 
 /** Shared Google album protocol. HTTP acknowledgement is not membership confirmation. */
 class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
@@ -14,19 +15,33 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     private val addEndpoint = "https://photosdata-pa.googleapis.com/6439526531001121323/484917746253879292"
 
     @Throws(Exception::class)
-    suspend fun list(credentialForm: String): List<GoogleAlbum> {
+    suspend fun list(credentialForm: String): List<GoogleAlbum> = listDetailed(credentialForm).albums
+
+    /**
+     * Full album library. Pass a previously captured sync token to refresh only
+     * what changed; a null token pulls every page.
+     */
+    @Throws(Exception::class)
+    suspend fun listDetailed(credentialForm: String, syncToken: String? = null): GoogleAlbumListingResult {
         val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
         val albums = mutableListOf<GoogleAlbum>()
         val cursors = mutableSetOf<String>()
         var cursor: String? = null
+        var latestSyncToken = syncToken
         repeat(10_000) {
-            val page = GoogleAlbumProtocol.decode(postAuthorized(auth, libraryEndpoint, GoogleAlbumListRequest.request(cursor)))
+            val body = if (cursor == null && syncToken != null) {
+                GoogleAlbumListRequest.syncRequest(syncToken)
+            } else {
+                GoogleAlbumListRequest.request(cursor)
+            }
+            val page = GoogleAlbumProtocol.decode(postAuthorized(auth, libraryEndpoint, body))
             albums += page.albums
+            if (!page.syncToken.isNullOrEmpty()) latestSyncToken = page.syncToken
             require(albums.size <= 5000) { "Album count exceeds safety limit." }
             cursor = page.nextCursor
             if (cursor == null) {
                 require(albums.groupBy { it.id }.values.all { entries -> entries.distinct().size == 1 })
-                return albums.distinctBy { it.id }
+                return GoogleAlbumListingResult(albums.distinctBy { it.id }, latestSyncToken)
             }
             require(cursors.add(cursor!!)) { "Repeated album page." }
         }
@@ -35,10 +50,15 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
 
     /** A bounded, credential-free failure reason for the device status panel. */
     suspend fun listDiagnosed(credentialForm: String): GoogleAlbumListing =
-        listDiagnosedWithin(credentialForm, 45_000)
+        listDiagnosed(credentialForm, null)
 
-    internal suspend fun listDiagnosedWithin(credentialForm: String, timeoutMillis: Long): GoogleAlbumListing = try {
-        GoogleAlbumListing(withTimeout(timeoutMillis) { list(credentialForm) }, null)
+    @Throws(Exception::class)
+    suspend fun listDiagnosed(credentialForm: String, syncToken: String?): GoogleAlbumListing =
+        listDiagnosedWithin(credentialForm, 45_000, syncToken)
+
+    internal suspend fun listDiagnosedWithin(credentialForm: String, timeoutMillis: Long, syncToken: String? = null): GoogleAlbumListing = try {
+        val result = withTimeout(timeoutMillis) { listDetailed(credentialForm, syncToken) }
+        GoogleAlbumListing(result.albums, null, result.syncToken)
     } catch (_: TimeoutCancellationException) {
         GoogleAlbumListing(null, "Google album listing timed out")
     } catch (e: CancellationException) {

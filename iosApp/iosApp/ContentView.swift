@@ -319,6 +319,7 @@ struct ContentView: View {
                 }
                 backupProgress = 1
                 backupStatus = "\(result.confirmed) confirmed, \(result.skipped) already backed up, \(result.failed) failed."
+                backupStatus! += " Album library: \(result.albumSource)."
                 if result.albumRequests > 0 {
                     backupStatus! += " \(result.albumRequests) album placements acknowledged, not remotely verified."
                 }

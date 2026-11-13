@@ -5,7 +5,7 @@ import gay.benjifox.foxyphotos.provider.google.GoogleNativeProtocol.varintField
 
 /** Native keys and optional web IDs are distinct. Never derive one from the other. */
 data class GoogleAlbum(val id: String, val title: String, val count: Long?, val webId: String?)
-data class GoogleAlbumPage(val albums: List<GoogleAlbum>, val nextCursor: String?)
+data class GoogleAlbumPage(val albums: List<GoogleAlbum>, val nextCursor: String?, val syncToken: String? = null)
 
 interface GoogleAlbumAccess {
     suspend fun albumPage(cursor: String? = null): GoogleAlbumPage
@@ -31,7 +31,11 @@ object GoogleAlbumProtocol {
         }
         val cursor = root.string(1)?.takeIf { it.isNotEmpty() }
         require(cursor == null || cursor.length <= 16384)
-        return GoogleAlbumPage(albums, cursor)
+        // Field 1.6 is the library sync token: a delta refresh is far smaller
+        // than re-pulling every album and media item on each backup.
+        val syncToken = root.string(6)?.takeIf { it.isNotEmpty() }
+        require(syncToken == null || syncToken.length <= 16384)
+        return GoogleAlbumPage(albums, cursor, syncToken)
     }
     private fun text(field: Int, value: String) = bytesField(field, value.encodeToByteArray())
     private fun device() = text(3, "Pixel XL") + text(4, "Google") + varintField(5, 28)

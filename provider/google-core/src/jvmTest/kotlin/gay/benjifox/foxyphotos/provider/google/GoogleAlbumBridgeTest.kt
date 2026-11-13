@@ -74,6 +74,25 @@ class GoogleAlbumBridgeTest {
         assertEquals("", GoogleNativeProtocol.ProtoFields(GoogleAlbumListRequest.request(null)).message(1)?.string(6))
     }
 
+    @Test fun `decode reads library sync token`() {
+        val container = bytes(1, "cursor".encodeToByteArray()) + bytes(6, "sync-1".encodeToByteArray())
+        val page = GoogleAlbumProtocol.decode(bytes(1, container))
+        assertEquals("sync-1", page.syncToken)
+        assertNull(page.nextCursor)
+    }
+
+    @Test fun `delta refresh listing sends sync token and no cursor`() = runBlocking {
+        val entry = text(1, "id") + bytes(2, text(5, "Album") + GoogleNativeProtocol.varintField(7, 1))
+        val container = bytes(1, byteArrayOf()) + bytes(6, "sync-2".encodeToByteArray()) + bytes(3, entry)
+        val fake = Fake(listOf(response("Auth=bearer\n".encodeToByteArray()), response(bytes(1, container))))
+        val result = GoogleAlbumBridge(fake).listDetailed(credential, "sync-1")
+        assertEquals(1, result.albums.size)
+        assertEquals("sync-2", result.syncToken)
+        val sent = GoogleNativeProtocol.ProtoFields(Base64.getDecoder().decode(fake.requests[1].bodyBase64))
+        assertEquals("sync-1", sent.message(1)?.string(6))
+        assertNull(sent.message(1)?.string(4))
+    }
+
     @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {
         val hanging = object : GoogleHttpTransport {
             var cancelled = false

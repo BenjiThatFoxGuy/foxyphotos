@@ -13,6 +13,7 @@ struct BackupResult {
     let albumRequests: Int
     let albumUnresolved: Int
     let albumIssues: [String: Int]
+    let albumSource: String
 }
 
 private struct StagedAsset {
@@ -152,6 +153,9 @@ private final class BackupReceipts {
     func contains(_ sha256: String) -> Bool { items[sha256] != nil }
     func mediaKey(_ sha256: String) -> String? { items[sha256] }
 
+    var directory: URL { url.deletingLastPathComponent() }
+    var scope: String { url.deletingPathExtension().lastPathComponent }
+
     func record(_ sha256: String, providerKey: String) throws {
         guard !providerKey.isEmpty else { throw BackupFailure.unavailable }
         var updated = items
@@ -171,6 +175,16 @@ final class IOSBackupSession {
         albumTransport.cancelActive()
     }
 
+    private static func stamp(_ date: Date?) -> String {
+        guard let date else { return "unknown date" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: date)
+    }
+
+    /// Read-only album discovery can run while PhotoKit stages the first original.
     func run(selected: Set<String>, albumNames: [String: String], pickedIds: [String]? = nil,
              deleteConfirmed: Bool,
              progress: @escaping (Int, Int, Int, String) async -> Void) async throws -> BackupResult {
@@ -181,10 +195,17 @@ final class IOSBackupSession {
         let journal = try BackupReceipts(credential: credential)
         let albumJournal = try IOSAlbumJournal(credential: credential)
         let albumBridge = GoogleAlbumBridge(transport: albumTransport)
+        let albumCache = GoogleAlbumCache(directory: journal.directory, scope: journal.scope)
+        let cachedAlbums = albumCache.load()
         // Read-only album discovery can run while PhotoKit stages the first original.
-        async let initialAlbumListing: GoogleAlbumListing? = try? await albumBridge.listDiagnosed(credentialForm: credential)
-        var remoteAlbums: [GoogleAlbum]?
-        var listingIssue = "Google album listing unavailable"
+        async let initialAlbumListing: GoogleAlbumListing? = try? await albumBridge.listDiagnosed(
+            credentialForm: credential, syncToken: cachedAlbums?.syncToken
+        )
+        var remoteAlbums: [GoogleAlbum]? = cachedAlbums?.albums
+        var listingIssue: String? = nil
+        var albumSource = cachedAlbums.map { snapshot in
+            "cached Google albums (\(snapshot.albums.count)) from \(Self.stamp(snapshot.fetchedAt))"
+        } ?? "no album library"
         var albumListingLoaded = false
         var retriedAlbumList = false
         let (assets, effectiveNames) = try await Task.detached(priority: .userInitiated) {
@@ -233,16 +254,38 @@ final class IOSBackupSession {
                                "Finding matching Google albums…")
                 if !albumListingLoaded {
                     let listing = await initialAlbumListing
-                    remoteAlbums = listing?.albums
-                    listingIssue = listing?.issue ?? listingIssue
                     albumListingLoaded = true
+                    if let albums = listing?.albums {
+                        remoteAlbums = albums
+                        listingIssue = nil
+                        albumSource = "fresh Google album listing (\(albums.count) albums)"
+                        albumCache.store(albums: albums,
+                                         syncToken: listing?.syncToken ?? cachedAlbums?.syncToken,
+                                         fetchedAt: Date())
+                    } else {
+                        // Listing failed: placement still works from the durable cache.
+                        remoteAlbums = cachedAlbums?.albums
+                        listingIssue = listing?.issue ?? "Google album listing unavailable"
+                        if cachedAlbums != nil { albumSource = "cached Google albums" }
+                    }
                 }
                 if remoteAlbums == nil && !retriedAlbumList &&
-                    (listingIssue == "Google listing request failed" || listingIssue.hasPrefix("Google listing Provider returned HTTP 5")) {
+                    (listingIssue?.hasPrefix("Google listing Provider returned HTTP 5") == true ||
+                     listingIssue?.hasPrefix("Google listing Provider transport failed") == true) {
                     retriedAlbumList = true
-                    let listing = try? await albumBridge.listDiagnosed(credentialForm: credential)
-                    remoteAlbums = listing?.albums
-                    listingIssue = listing?.issue ?? listingIssue
+                    let listing = try? await albumBridge.listDiagnosed(
+                        credentialForm: credential, syncToken: cachedAlbums?.syncToken
+                    )
+                    if let albums = listing?.albums {
+                        remoteAlbums = albums
+                        listingIssue = nil
+                        albumSource = "fresh Google album listing (\(albums.count) albums)"
+                        albumCache.store(albums: albums,
+                                         syncToken: listing?.syncToken ?? cachedAlbums?.syncToken,
+                                         fetchedAt: Date())
+                    } else {
+                        listingIssue = listing?.issue ?? listingIssue
+                    }
                 }
                 for folder in selectedAsset.albumIds {
                     guard let title = effectiveNames[folder] else {
@@ -254,7 +297,7 @@ final class IOSBackupSession {
                         continue
                     }
                     guard let remoteAlbums else {
-                        noteAlbumIssue(listingIssue)
+                        noteAlbumIssue(listingIssue ?? "Google album listing unavailable")
                         continue
                     }
                     let acknowledged = await albumJournal.associate(
@@ -288,7 +331,7 @@ final class IOSBackupSession {
                                     deletionRequested: 0, deletionSucceeded: false,
                                     deletionIneligible: deletionIneligible,
                                     albumRequests: albumRequests, albumUnresolved: albumUnresolved,
-                                    albumIssues: albumIssues)
+                                    albumIssues: albumIssues, albumSource: albumSource)
             }
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -306,6 +349,6 @@ final class IOSBackupSession {
                             deletionRequested: deletionCandidates.count, deletionSucceeded: deleted,
                             deletionIneligible: deletionIneligible,
                             albumRequests: albumRequests, albumUnresolved: albumUnresolved,
-                            albumIssues: albumIssues)
+                            albumIssues: albumIssues, albumSource: albumSource)
     }
 }
