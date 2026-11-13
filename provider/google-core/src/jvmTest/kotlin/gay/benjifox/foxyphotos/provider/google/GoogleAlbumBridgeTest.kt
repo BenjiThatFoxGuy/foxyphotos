@@ -78,7 +78,7 @@ class GoogleAlbumBridgeTest {
         val container = bytes(1, "cursor".encodeToByteArray()) + bytes(6, "sync-1".encodeToByteArray())
         val page = GoogleAlbumProtocol.decode(bytes(1, container))
         assertEquals("sync-1", page.syncToken)
-        assertNull(page.nextCursor)
+        assertEquals("cursor", page.nextCursor)
     }
 
     @Test fun `delta refresh listing sends sync token and no cursor`() = runBlocking {

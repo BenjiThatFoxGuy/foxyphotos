@@ -1,4 +1,5 @@
 import Foundation
+import FoxyPhotosGoogleCore
 
 /// Credential-scoped, durable Google album library.
 ///
