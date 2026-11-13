@@ -1,5 +1,6 @@
 import Photos
 import SwiftUI
+import UIKit
 
 private struct PhotoAlbum: Identifiable {
     let id: String
@@ -67,10 +68,14 @@ struct ContentView: View {
                 if !selection.hasAccess {
                     Section {
                         Label("Allow Photos access to choose albums for backup.", systemImage: "photo.on.rectangle")
-                        Button("Choose Photos access") { selection.requestAccess() }
                         if selection.access == .denied || selection.access == .restricted {
                             Text("Photos access is off. Enable it in Settings to choose albums.")
                                 .foregroundStyle(.secondary)
+                            if let settings = URL(string: UIApplication.openSettingsURLString) {
+                                Link("Open Settings", destination: settings)
+                            }
+                        } else {
+                            Button("Choose Photos access") { selection.requestAccess() }
                         }
                     }
                 } else {
@@ -112,7 +117,11 @@ struct ContentView: View {
             .navigationTitle("FoxyPhotos")
             .toolbar {
                 if selection.hasAccess {
-                    Button("Refresh", systemImage: "arrow.clockwise") { selection.refresh() }
+                    Button {
+                        selection.refresh()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
             }
             .onAppear { selection.refresh() }
