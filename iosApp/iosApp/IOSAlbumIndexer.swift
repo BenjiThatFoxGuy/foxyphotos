@@ -47,23 +47,11 @@ enum IOSAlbumIndexer {
             // cursor the provider rejects falls back to a full refresh rather
             // than wedging the library forever.
             let checkpoint = cache.loadCheckpoint()
-            let listing: (albums: [GoogleAlbum], syncToken: String?)
-            if let cursor = checkpoint?.cursor {
-                do {
-                    listing = try await list(credential: credential, cache: cache, bridge: bridge,
-                                             syncToken: nil, startCursor: cursor,
-                                             progress: progress, showsUI: showsUI)
-                } catch {
-                    cache.clearCheckpoint()
-                    listing = try await list(credential: credential, cache: cache, bridge: bridge,
-                                             syncToken: cache.load()?.syncToken, startCursor: nil,
-                                             progress: progress, showsUI: showsUI)
-                }
-            } else {
-                listing = try await list(credential: credential, cache: cache, bridge: bridge,
-                                         syncToken: cache.load()?.syncToken, startCursor: nil,
+            let listing = try await list(credential: credential, cache: cache, bridge: bridge,
+                                         syncToken: checkpoint?.syncToken,
+                                         startCursor: checkpoint?.cursor,
+                                         initialAlbums: checkpoint?.albums.map { $0.album() } ?? [],
                                          progress: progress, showsUI: showsUI)
-            }
             // Only a completed run is cached. Storing a fresh sync token against
             // an older album set would make the next delta refresh skip albums
             // that changed between the two; an interrupted run keeps the old
@@ -92,24 +80,36 @@ enum IOSAlbumIndexer {
                              bridge: GoogleAlbumBridge,
                              syncToken: String?,
                              startCursor: String?,
+                             initialAlbums: [GoogleAlbum],
                              progress: @escaping (String) async -> Void,
                              showsUI: Bool) async throws -> (albums: [GoogleAlbum], syncToken: String?) {
+        var checkpointError: Error?
         let result = try await bridge.listDetailed(
             credentialForm: credential,
             syncToken: syncToken,
             startCursor: startCursor,
-            onPage: { page, albumCount, syncToken, nextCursor in
-                // Durable after every page: a suspended app must not throw away
-                // the pages it already read.
-                cache.storeCheckpoint(GoogleAlbumCache.Checkpoint(
-                    cursor: nextCursor, syncToken: syncToken, fetchedAt: Date()))
+            onPage: { page, albumCount, _, _ in
                 let phase = "Fetching Google albums… page \(page) (\(albumCount) albums)"
                 if showsUI {
                     AlbumIndexActivity.update(phase: phase, completed: Int(page), total: 0,
                                               failed: 0, library: "")
                 }
                 Task { await progress(phase) }
+            },
+            initialAlbums: initialAlbums,
+            onPageSnapshot: { albums, syncToken, nextCursor in
+                // A cursor without its preceding pages makes an incomplete cache.
+                // Only advance it once the entire prefix has been saved atomically.
+                guard checkpointError == nil else { return }
+                do {
+                    try cache.storeCheckpoint(GoogleAlbumCache.Checkpoint(
+                        cursor: nextCursor, syncToken: syncToken,
+                        albums: albums.map { GoogleAlbumCache.CachedAlbum(
+                            id: $0.id, title: $0.title, count: $0.count?.int64Value,
+                            webId: $0.webId) }, fetchedAt: Date()))
+                } catch { checkpointError = error }
             })
+        if let checkpointError { throw checkpointError }
         return (result.albums, result.syncToken)
     }
 }

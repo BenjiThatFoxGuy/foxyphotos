@@ -30,9 +30,12 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     @Throws(Exception::class)
     suspend fun listDetailed(credentialForm: String, syncToken: String? = null,
                              startCursor: String? = null,
-                             onPage: ((Int, Int, String?, String?) -> Unit)? = null): GoogleAlbumListingResult {
+                             onPage: ((Int, Int, String?, String?) -> Unit)? = null,
+                             initialAlbums: List<GoogleAlbum> = emptyList(),
+                             onPageSnapshot: ((List<GoogleAlbum>, String?, String?) -> Unit)? = null): GoogleAlbumListingResult {
+        require(startCursor != null || initialAlbums.isEmpty()) { "Saved albums require a resume cursor." }
         val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
-        val albums = mutableListOf<GoogleAlbum>()
+        val albums = initialAlbums.toMutableList()
         val cursors = mutableSetOf<String>()
         var cursor: String? = startCursor
         var latestSyncToken = syncToken
@@ -53,6 +56,7 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
             // Page progress is the only honest signal: a full library is many
             // pages and the caller needs to show that it is moving. The cursor is
             // included so an interrupted listing can resume instead of restarting.
+            onPageSnapshot?.invoke(albums.toList(), latestSyncToken, nextCursor)
             onPage?.invoke(pageIndex, albums.size, latestSyncToken, nextCursor)
             cursor = nextCursor
             if (cursor == null) {

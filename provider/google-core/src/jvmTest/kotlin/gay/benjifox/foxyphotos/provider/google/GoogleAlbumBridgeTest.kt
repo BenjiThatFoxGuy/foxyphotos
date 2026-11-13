@@ -129,6 +129,31 @@ class GoogleAlbumBridgeTest {
         assertEquals("", sent.message(1)?.string(6))
     }
 
+    @Test fun `listing resumes with saved pages and checkpoints the complete prefix`() = runBlocking {
+        fun entry(id: String) = text(1, id) + bytes(2, text(5, "Album") + GoogleNativeProtocol.varintField(7, 1))
+        val fake = Fake(listOf(
+            response("Auth=bearer\n".encodeToByteArray()),
+            response(bytes(1, bytes(3, entry("id-2"))))
+        ))
+        val previous = GoogleAlbum("id-1", "Album", 1L, null)
+        val snapshots = mutableListOf<List<GoogleAlbum>>()
+        val result = GoogleAlbumBridge(fake).listDetailed(credential,
+            startCursor = "cursor-1", initialAlbums = listOf(previous),
+            onPageSnapshot = { albums, _, _ -> snapshots += albums })
+        assertEquals(listOf("id-1", "id-2"), result.albums.map { it.id })
+        assertEquals(listOf("id-1", "id-2"), snapshots.single().map { it.id })
+    }
+
+    @Test fun `saved albums cannot be applied without their cursor`() = runBlocking {
+        try {
+            GoogleAlbumBridge(Fake(emptyList())).listDetailed(credential,
+                initialAlbums = listOf(GoogleAlbum("id-1", "Album", 1L, null)))
+            fail("Expected a missing cursor to reject saved albums")
+        } catch (_: IllegalArgumentException) {
+            // A saved prefix is only valid together with the cursor that follows it.
+        }
+    }
+
     @Test fun `stalled library request returns bounded diagnostic and cancels its transport`() = runBlocking {
         val hanging = object : GoogleHttpTransport {
             var cancelled = false

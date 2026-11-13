@@ -25,6 +25,7 @@ struct GoogleAlbumCache {
     struct Checkpoint: Codable {
         var cursor: String?
         var syncToken: String?
+        var albums: [CachedAlbum]
         var fetchedAt: Date
     }
 
@@ -82,15 +83,18 @@ struct GoogleAlbumCache {
     func clear() { try? FileManager.default.removeItem(at: fileURL) }
 
     func loadCheckpoint() -> Checkpoint? {
-        guard let data = try? Data(contentsOf: checkpointURL),
-              let checkpoint = try? decoder.decode(Checkpoint.self, from: data) else { return nil }
+        let checkpoint = try? loadCheckpointThrowing()
         return checkpoint
     }
 
-    func storeCheckpoint(_ checkpoint: Checkpoint) {
-        guard let data = try? encoder.encode(checkpoint) else { return }
+    private func loadCheckpointThrowing() throws -> Checkpoint {
+        try decoder.decode(Checkpoint.self, from: Data(contentsOf: checkpointURL))
+    }
+
+    func storeCheckpoint(_ checkpoint: Checkpoint) throws {
+        let data = try encoder.encode(checkpoint)
         let options: Data.WritingOptions = [.atomic, .completeFileProtectionUnlessOpen]
-        try? data.write(to: checkpointURL, options: options)
+        try data.write(to: checkpointURL, options: options)
     }
 
     func clearCheckpoint() { try? FileManager.default.removeItem(at: checkpointURL) }
