@@ -20,11 +20,15 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
     /**
      * Full album library. Pass a previously captured sync token to refresh only
      * what changed; a null token pulls every page.
+     *
+     * There is deliberately no page or whole-run bound: a large library is many
+     * pages and the transport's own request timeout is the only stall guard.
+     * An artificial cap shorter than a legitimate listing kills it and masks
+     * the real reason.
      */
     @Throws(Exception::class)
     suspend fun listDetailed(credentialForm: String, syncToken: String? = null,
-                             onPage: ((Int, Int, String?) -> Unit)? = null,
-                             pageTimeoutMillis: Long = 180_000): GoogleAlbumListingResult {
+                             onPage: ((Int, Int, String?) -> Unit)? = null): GoogleAlbumListingResult {
         val auth = provider.authenticate(GoogleCredentialParser.parse(credentialForm))
         val albums = mutableListOf<GoogleAlbum>()
         val cursors = mutableSetOf<String>()
@@ -37,11 +41,7 @@ class GoogleAlbumBridge(private val transport: GoogleHttpTransport) {
             } else {
                 GoogleAlbumListRequest.request(cursor)
             }
-            // Bound each page, not the whole library: one stalled page fails fast
-            // while a genuinely large library keeps paging.
-            val page = GoogleAlbumProtocol.decode(
-                withTimeout(pageTimeoutMillis) { postAuthorized(auth, libraryEndpoint, body) }
-            )
+            val page = GoogleAlbumProtocol.decode(postAuthorized(auth, libraryEndpoint, body))
             albums += page.albums
             if (!page.syncToken.isNullOrEmpty()) latestSyncToken = page.syncToken
             require(albums.size <= 5000) { "Album count exceeds safety limit." }

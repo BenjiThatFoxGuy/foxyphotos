@@ -52,8 +52,7 @@ enum IOSAlbumIndexer {
                                               failed: 0, library: "")
                 }
                 Task { await progress(phase) }
-            },
-                                                       pageTimeoutMillis: 180_000)
+            })
             // Only a completed run is cached. Storing a fresh sync token against
             // an older album set would make the next delta refresh skip albums
             // that changed between the two; an interrupted run keeps the old

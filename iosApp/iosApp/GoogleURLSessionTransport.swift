@@ -6,10 +6,11 @@ final class GoogleURLSessionTransport: NSObject, GoogleHttpTransport, URLSession
     private let lock = NSLock()
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
-        // Album pages can be large and slow on a cold library; never let the
-        // default 60s request timeout abort a legitimate listing.
-        configuration.timeoutIntervalForRequest = 120
-        configuration.timeoutIntervalForResource = 600
+        // Album pages can be large and slow on a cold library; the only stall
+        // guard is the transport's own request timeout, never an artificial cap
+        // shorter than a legitimate listing.
+        configuration.timeoutIntervalForRequest = 600
+        configuration.timeoutIntervalForResource = 3600
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
     private var activeTasks: [UUID: URLSessionTask] = [:]
