@@ -1,7 +1,6 @@
 import Photos
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
 private struct PhotoAlbum: Identifiable, Sendable {
     static let cameraRollId = "foxyphotos:camera-roll"
@@ -110,6 +109,7 @@ private final class PhotoSelection: ObservableObject {
 struct ContentView: View {
     @StateObject private var selection = PhotoSelection()
     @State private var importingCredential = false
+    @State private var credentialInput = ""
     @State private var credentialConfigured = GoogleCredentialStore.isConfigured
     @State private var credentialMessage: String?
 
@@ -162,12 +162,13 @@ struct ContentView: View {
                         }
                     }
                     Section("Backup provider") {
-                        Button(credentialConfigured ? "Replace Google credential" : "Import Google credential") {
+                        Button(credentialConfigured ? "Replace Google credential" : "Paste Google credential") {
+                            credentialMessage = nil
                             importingCredential = true
                         }
                         Text(credentialConfigured
                              ? "Credential stored on this device. Uploads are not enabled yet."
-                             : "Import your Google Photos credential file to prepare this device for backup.")
+                             : "Paste your Google Photos credential string to prepare this device for backup.")
                             .font(.footnote).foregroundStyle(.secondary)
                         if let credentialMessage {
                             Text(credentialMessage).font(.footnote).foregroundStyle(.secondary)
@@ -196,21 +197,50 @@ struct ContentView: View {
                 selection.refresh()
                 credentialConfigured = GoogleCredentialStore.isConfigured
             }
-            .fileImporter(isPresented: $importingCredential, allowedContentTypes: [.item]) { result in
-                switch result {
-                case .success(let url):
-                    do {
-                        try GoogleCredentialStore.importFile(url)
-                        credentialConfigured = GoogleCredentialStore.isConfigured
-                        credentialMessage = "Credential saved securely."
-                    } catch GoogleCredentialStore.ImportError.invalidFile {
-                        credentialMessage = "This file is not a supported Google credential form."
-                    } catch {
-                        credentialMessage = "Credential import failed. The previous credential was kept."
+            .sheet(isPresented: $importingCredential, onDismiss: { credentialInput = "" }) {
+                NavigationStack {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Paste the Google Photos auth string used on Android.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        TextEditor(text: $credentialInput)
+                            .frame(height: 120)
+                            .scrollContentBackground(.hidden)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .privacySensitive()
+                            .accessibilityLabel("Google Photos credential")
+                        if let credentialMessage {
+                            Text(credentialMessage).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
                     }
-                case .failure:
-                    credentialMessage = "Credential import was not completed."
+                    .padding()
+                    .navigationTitle("Google credential")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { credentialInput = ""; importingCredential = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                do {
+                                    try GoogleCredentialStore.save(credentialInput)
+                                    credentialConfigured = GoogleCredentialStore.isConfigured
+                                    credentialMessage = "Credential saved on this device."
+                                    credentialInput = ""
+                                    importingCredential = false
+                                } catch GoogleCredentialStore.ImportError.invalidCredential {
+                                    credentialMessage = "Invalid Google credential string. Check the pasted value."
+                                } catch {
+                                    credentialMessage = "Could not save credential. The previous one was kept."
+                                }
+                            }
+                            .disabled(credentialInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
                 }
+                .presentationDetents([.medium])
             }
         }
     }

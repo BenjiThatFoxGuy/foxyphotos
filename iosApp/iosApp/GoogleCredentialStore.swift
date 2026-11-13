@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// Imported Android Google Photos auth form. Stored only in this device's Keychain.
+/// Pasted Google Photos auth form. Stored only in this device's Keychain.
 /// No credential bytes are persisted in UserDefaults or included in logs.
 enum GoogleCredentialStore {
     private static let service = "gay.benjifox.foxyphotos.google-native"
@@ -11,33 +11,24 @@ enum GoogleCredentialStore {
         "androidId", "app", "client_sig", "Email", "Token", "lang", "service"
     ]
 
-    static var isConfigured: Bool {
-        var query: [String: Any] = baseQuery
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
-    }
+    static var isConfigured: Bool { load() != nil }
 
-    static func importFile(_ url: URL) throws {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        guard let data = try handle.read(upToCount: maximumBytes + 1),
-              !data.isEmpty, data.count <= maximumBytes,
-              let raw = String(data: data, encoding: .utf8) else {
-            throw ImportError.invalidFile
+    static func save(_ pasted: String) throws {
+        let raw = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        let data = Data(raw.utf8)
+        guard !data.isEmpty, data.count <= maximumBytes else {
+            throw ImportError.invalidCredential
         }
-        // This is a form payload, not a bearer token. Validate shape without
-        // displaying or recording any field value; the shared parser validates
-        // the contents again before an auth request is ever made.
-        let fields = raw.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "&")
+        // Validate shape without displaying or recording field values. The
+        // shared parser validates again before an auth request is ever made.
+        let fields = raw.split(separator: "&")
         var present = Set<String>()
         for field in fields {
             guard let separator = field.firstIndex(of: "="), separator != field.startIndex,
-                  field.index(after: separator) != field.endIndex else { throw ImportError.invalidFile }
+                  field.index(after: separator) != field.endIndex else { throw ImportError.invalidCredential }
             present.insert(String(field[..<separator]))
         }
-        guard requiredFields.isSubset(of: present) else { throw ImportError.invalidFile }
+        guard requiredFields.isSubset(of: present) else { throw ImportError.invalidCredential }
         try store(data)
     }
 
@@ -68,5 +59,5 @@ enum GoogleCredentialStore {
          kSecAttrAccount as String: account]
     }
 
-    enum ImportError: Error { case invalidFile, keychainUnavailable }
+    enum ImportError: Error { case invalidCredential, keychainUnavailable }
 }
