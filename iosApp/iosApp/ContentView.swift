@@ -260,6 +260,17 @@ struct ContentView: View {
                 if phase == .background, isIndexing {
                     IOSBackgroundJobs.scheduleIndex()
                 }
+                // A brief notification-shade visit may have interrupted a
+                // foreground request before its failure callback ran. Once the
+                // app is active again, continue the saved page prefix.
+                if phase == .active {
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        if !isIndexing && IOSAlbumIndexer.hasIncompleteRefresh() {
+                            refreshAlbumLibrary()
+                        }
+                    }
+                }
             }
             .sheet(isPresented: $showingPrivatePicker) {
                 PrivatePhotoPicker(inspectFiles: !pickerForBackup) { report, ids, inaccessible in
@@ -406,8 +417,12 @@ struct ContentView: View {
                 }
                 indexStatus = "\(result.albumCount) Google albums cached. \(result.source)."
             } catch is CancellationError {
-                indexStatus = "Album library refresh cancelled. The previous cache was kept."
+                IOSBackgroundJobs.scheduleIndex()
+                indexStatus = "Album refresh interrupted. Saved pages will resume in the background or when you reopen the app."
             } catch {
+                if IOSAlbumIndexer.hasIncompleteRefresh() {
+                    IOSBackgroundJobs.scheduleIndex()
+                }
                 let failure = error as? BackupFailure
                 let reason = failure?.message ?? String(error.localizedDescription.prefix(200))
                 indexStatus = reason.isEmpty

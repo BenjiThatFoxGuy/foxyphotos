@@ -13,9 +13,16 @@ enum IOSAlbumIndexer {
         let source: String
     }
 
-    /// Refreshes the cached album library. The cached sync token makes this a
-    /// delta refresh, so a repeat run only pulls what changed. A checkpoint left
-    /// by an interrupted run is resumed from its cursor instead of restarting.
+    static func hasIncompleteRefresh() -> Bool {
+        guard let data = GoogleCredentialStore.load(),
+              let credential = String(data: data, encoding: .utf8),
+              let journal = try? BackupReceipts(credential: credential) else { return false }
+        return GoogleAlbumCache(directory: journal.directory, scope: journal.scope)
+            .loadCheckpoint()?.cursor != nil
+    }
+
+    /// Refreshes the cached album library. A checkpoint left by an interrupted
+    /// run resumes from its cursor instead of restarting.
     ///
     /// There is deliberately no whole-run bound, matching Android: a large
     /// library is many pages, so the per-page bound is the stall guard. A
@@ -46,12 +53,30 @@ enum IOSAlbumIndexer {
             // A checkpoint from an interrupted run resumes from its cursor. A
             // cursor the provider rejects falls back to a full refresh rather
             // than wedging the library forever.
-            let checkpoint = cache.loadCheckpoint()
-            let listing = try await list(credential: credential, cache: cache, bridge: bridge,
-                                         syncToken: checkpoint?.syncToken,
-                                         startCursor: checkpoint?.cursor,
-                                         initialAlbums: checkpoint?.albums.map { $0.album() } ?? [],
-                                         progress: progress, showsUI: showsUI)
+            // If iOS dropped the active request during a short interruption,
+            // restart from the last durable page instead of failing the whole
+            // refresh. Other failures (auth, malformed response) are surfaced.
+            var listing: (albums: [GoogleAlbum], syncToken: String?)? = nil
+            for attempt in 0..<3 {
+                do {
+                    let checkpoint = cache.loadCheckpoint()
+                    listing = try await list(credential: credential, cache: cache, bridge: bridge,
+                                             syncToken: checkpoint?.syncToken,
+                                             startCursor: checkpoint?.cursor,
+                                             initialAlbums: checkpoint?.albums.map { $0.album() } ?? [],
+                                             progress: progress, showsUI: showsUI)
+                    break
+                } catch {
+                    if Task.isCancelled || background.didExpire { throw CancellationError() }
+                    let reason = error.localizedDescription.lowercased()
+                    guard attempt < 2,
+                          reason.contains("transport") || reason.contains("timed out") ||
+                          reason.contains("network connection") else { throw error }
+                    await progress("Connection interrupted. Resuming from the saved album page…")
+                    try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 2_000_000_000)
+                }
+            }
+            guard let listing else { throw BackupFailure.alreadyRunning }
             // Only a completed run is cached. Storing a fresh sync token against
             // an older album set would make the next delta refresh skip albums
             // that changed between the two; an interrupted run keeps the old
