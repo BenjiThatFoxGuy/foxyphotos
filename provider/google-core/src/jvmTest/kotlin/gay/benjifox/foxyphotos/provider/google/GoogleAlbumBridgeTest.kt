@@ -70,7 +70,7 @@ class GoogleAlbumBridgeTest {
     @Test fun `delta refresh request carries the library sync token`() {
         val request = GoogleNativeProtocol.ProtoFields(GoogleAlbumListRequest.syncRequest("sync-1"))
         assertEquals("sync-1", request.message(1)?.string(6))
-        assertEquals("", request.message(1)?.string(4))
+        assertNull(request.message(1)?.string(4))
         assertEquals("", GoogleNativeProtocol.ProtoFields(GoogleAlbumListRequest.request(null)).message(1)?.string(6))
     }
 
