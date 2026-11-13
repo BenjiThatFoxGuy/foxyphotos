@@ -26,6 +26,7 @@ struct GoogleAlbumCache {
         var cursor: String?
         var syncToken: String?
         var albums: [CachedAlbum]
+        var completed: Bool
         var fetchedAt: Date
     }
 
@@ -67,6 +68,10 @@ struct GoogleAlbumCache {
     }
 
     func store(albums: [GoogleAlbum], syncToken: String?, fetchedAt: Date) {
+        try? storeVerified(albums: albums, syncToken: syncToken, fetchedAt: fetchedAt)
+    }
+
+    func storeVerified(albums: [GoogleAlbum], syncToken: String?, fetchedAt: Date) throws {
         let state = State(
             albums: albums.map { CachedAlbum(id: $0.id, title: $0.title,
                                              count: $0.count?.int64Value,
@@ -75,9 +80,9 @@ struct GoogleAlbumCache {
             fetchedAt: fetchedAt,
             complete: true
         )
-        guard let data = try? encoder.encode(state) else { return }
+        let data = try encoder.encode(state)
         let options: Data.WritingOptions = [.atomic, .completeFileProtectionUnlessOpen]
-        try? data.write(to: fileURL, options: options)
+        try data.write(to: fileURL, options: options)
     }
 
     func clear() { try? FileManager.default.removeItem(at: fileURL) }

@@ -245,6 +245,7 @@ struct ContentView: View {
             .onAppear {
                 selection.refresh()
                 credentialConfigured = GoogleCredentialStore.isConfigured
+                if IOSAlbumIndexer.hasIncompleteRefresh() { refreshAlbumLibrary() }
             }
             .onChange(of: scenePhase) { phase in
                 // Submit the processing task only once the app is actually

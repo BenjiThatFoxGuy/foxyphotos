@@ -4,9 +4,9 @@ import FoxyPhotosGoogleCore
 /// Standalone, resumable Google album library refresh.
 ///
 /// Album listing is a long, multi-page job and Google can fail part-way through.
-/// The durable cache, the page checkpoint and the library sync token make a
-/// refresh resumable, so this runs outside a backup and reports page-level
-/// progress instead of blocking the backup UI.
+/// The durable cache and page checkpoint make an interrupted listing
+/// resumable, so it reports page-level progress instead of blocking the backup
+/// UI. A full listing starts from page one when there is no checkpoint.
 enum IOSAlbumIndexer {
     struct Result {
         let albumCount: Int
@@ -18,17 +18,15 @@ enum IOSAlbumIndexer {
               let credential = String(data: data, encoding: .utf8),
               let journal = try? BackupReceipts(credential: credential) else { return false }
         return GoogleAlbumCache(directory: journal.directory, scope: journal.scope)
-            .loadCheckpoint()?.cursor != nil
+            .loadCheckpoint() != nil
     }
 
     /// Refreshes the cached album library. A checkpoint left by an interrupted
     /// run resumes from its cursor instead of restarting.
     ///
-    /// There is deliberately no whole-run bound, matching Android: a large
-    /// library is many pages, so the per-page bound is the stall guard. A
-    /// whole-run cap shorter than a legitimate listing kills it and masks the
-    /// real reason. A scheduled background pass is bounded by the processing
-    /// task's own expiry instead.
+    /// There is deliberately no whole-run bound: a large library is many
+    /// pages. The transport's request timeout guards a stalled request;
+    /// BGProcessingTask expiry controls each background pass.
     static func refresh(progress: @escaping (String) async -> Void,
                         showsUI: Bool = true) async throws -> Result {
         guard let credentialData = GoogleCredentialStore.load(),
@@ -50,12 +48,25 @@ enum IOSAlbumIndexer {
             AlbumIndexActivity.start(name: "Google album library")
         }
         do {
-            // A checkpoint from an interrupted run resumes from its cursor. A
-            // cursor the provider rejects falls back to a full refresh rather
-            // than wedging the library forever.
-            // If iOS dropped the active request during a short interruption,
-            // restart from the last durable page instead of failing the whole
-            // refresh. Other failures (auth, malformed response) are surfaced.
+            // Record intent before the first network request. If the process
+            // is suspended on page one there is no cursor yet, but the next
+            // foreground launch or BGProcessingTask still knows to resume.
+            if cache.loadCheckpoint() == nil {
+                try cache.storeCheckpoint(GoogleAlbumCache.Checkpoint(
+                    cursor: nil, syncToken: nil, albums: [], completed: false,
+                    fetchedAt: Date()))
+            }
+            if let complete = cache.loadCheckpoint(), complete.completed {
+                try cache.storeVerified(albums: complete.albums.map { $0.album() },
+                                        syncToken: complete.syncToken, fetchedAt: complete.fetchedAt)
+                cache.clearCheckpoint()
+                let count = complete.albums.count
+                if showsUI { AlbumIndexActivity.end() }
+                return Result(albumCount: count, source: "recovered Google album listing (\(count) albums)")
+            }
+            // An interrupted run resumes from its saved prefix. A transient
+            // transport failure retries from the last durable page; auth and
+            // malformed responses still surface to the user.
             var listing: (albums: [GoogleAlbum], syncToken: String?)? = nil
             for attempt in 0..<3 {
                 do {
@@ -81,7 +92,7 @@ enum IOSAlbumIndexer {
             // an older album set would make the next delta refresh skip albums
             // that changed between the two; an interrupted run keeps the old
             // cache and resumes from its checkpoint next time.
-            cache.store(albums: listing.albums, syncToken: listing.syncToken, fetchedAt: Date())
+            try cache.storeVerified(albums: listing.albums, syncToken: listing.syncToken, fetchedAt: Date())
             cache.clearCheckpoint()
             let source = listing.albums.isEmpty
                 ? "fresh Google album listing (empty library)"
@@ -131,7 +142,8 @@ enum IOSAlbumIndexer {
                         cursor: nextCursor, syncToken: syncToken,
                         albums: albums.map { GoogleAlbumCache.CachedAlbum(
                             id: $0.id, title: $0.title, count: $0.count?.int64Value,
-                            webId: $0.webId) }, fetchedAt: Date()))
+                            webId: $0.webId) }, completed: nextCursor == nil,
+                        fetchedAt: Date()))
                 } catch { checkpointError = error }
             })
         if let checkpointError { throw checkpointError }
