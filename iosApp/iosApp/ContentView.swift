@@ -112,7 +112,6 @@ struct ContentView: View {
     @State private var showingPrivatePicker = false
     @State private var pickerForBackup = false
     @State private var pickerReport: String?
-    @State private var isFinishingDeletions = false
     @State private var credentialInput = ""
     @State private var credentialConfigured = GoogleCredentialStore.isConfigured
     @State private var credentialError: String?
@@ -246,15 +245,8 @@ struct ContentView: View {
             .onAppear {
                 selection.refresh()
                 credentialConfigured = GoogleCredentialStore.isConfigured
-                DeletionNotifier.requestAuthorization()
             }
             .onChange(of: scenePhase) { phase in
-                // A background pass records deletion intent and posts a
-                // notification. Returning to the app is the signal to finish it
-                // through iOS's own prompt.
-                if phase == .active {
-                    finishPendingDeletions()
-                }
                 // Submit the processing task only once the app is actually
                 // backgrounded. Submitting earlier lets the scheduler fire it
                 // while the foreground run is still writing, and the two passes
@@ -331,25 +323,6 @@ struct ContentView: View {
                 }
                 .presentationDetents([.medium])
             }
-        }
-    }
-
-    /// Finishes deletions a background pass recorded. iOS presents its own
-    /// prompt, so this only runs while the app is in the foreground.
-    @MainActor private func finishPendingDeletions() {
-        guard !isFinishingDeletions, !isBackingUp else { return }
-        isFinishingDeletions = true
-        Task {
-            let carried = await IOSBackupSession.finishPendingDeletions()
-            isFinishingDeletions = false
-            guard carried.deleted > 0 || carried.ineligible > 0 else { return }
-            var line = carried.deleted > 0
-                ? "\(carried.deleted) originals deleted with iOS approval."
-                : "No originals were deleted."
-            if carried.ineligible > 0 {
-                line += " \(carried.ineligible) complex assets kept on device."
-            }
-            backupStatus = line
         }
     }
 
