@@ -2,6 +2,8 @@ name: Spike Rust UniFFI codec
 
 on:
   workflow_dispatch:
+  push:
+    branches: [spike/rust-uniffi-codec]
 
 permissions:
   contents: read
