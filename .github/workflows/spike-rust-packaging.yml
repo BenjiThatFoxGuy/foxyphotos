@@ -86,6 +86,8 @@ jobs:
             -library target/aarch64-apple-ios-sim/release/libfoxy_spike_codec.a \
             -headers out/swift \
             -output xcframework/foxy_spike_codec.xcframework
+          find xcframework/foxy_spike_codec.xcframework -type d -name Headers \
+            -exec cp out/swift/foxy_spike_codecFFI.modulemap {}/module.modulemap \;
       - uses: actions/upload-artifact@v4
         with:
           name: spike-ios-rust
