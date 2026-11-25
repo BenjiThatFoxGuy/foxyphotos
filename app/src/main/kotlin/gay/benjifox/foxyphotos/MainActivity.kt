@@ -69,7 +69,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Throwaway spike: force the Rust codec into the device build.
-        android.util.Log.d("SpikeRust", "RUST_SPIKE_ANDROID ${uniffi.foxy_spike_codec.encodeUploadTokenRequest(1u).size} bytes")
+        try {
+            val bytes = uniffi.foxy_spike_codec.encodeUploadTokenRequest(1u)
+            android.util.Log.d("SpikeRust", "RUST_SPIKE_ANDROID ${bytes.size} bytes")
+        } catch (t: Throwable) {
+            android.util.Log.d("SpikeRust", "RUST_SPIKE_ANDROID unavailable: ${t.message}")
+        }
         setContent { MaterialTheme(colorScheme = darkColorScheme()) { FoxyPhotosApp() } }
     }
 }
