@@ -22,6 +22,9 @@ dependencies {
 }
 
 tasks.test {
-    jvmArgs("-Djava.library.path=${projectDir}/../../target/release")
+    jvmArgs(
+        "-Djava.library.path=${projectDir}/../../target/release",
+        "-Djna.library.path=${projectDir}/../../target/release",
+    )
     testLogging.showStandardStreams = true
 }
