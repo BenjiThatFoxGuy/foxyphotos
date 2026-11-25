@@ -71,6 +71,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:updater"))
     implementation(libs.okhttp)
+    implementation("net.java.dev.jna:jna:5.12.0@aar")
     implementation(libs.kotlinx.coroutines.core)
     implementation(project(":core:backup"))
     implementation(project(":core:database"))

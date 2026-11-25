@@ -107,6 +107,13 @@ private final class PhotoSelection: ObservableObject {
 }
 
 struct ContentView: View {
+    init() {
+        // Throwaway spike: force the Rust codec into the device build.
+        if let encoded = try? encodeUploadTokenRequest(fileSize: 1) {
+            print("RUST_SPIKE_IOS \(encoded.count) bytes")
+        }
+    }
+
     @StateObject private var selection = PhotoSelection()
     @State private var importingCredential = false
     @State private var showingPrivatePicker = false

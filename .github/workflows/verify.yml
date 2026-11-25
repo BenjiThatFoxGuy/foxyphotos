@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   # Needed to sign and record artifact attestations (Sigstore-backed SLSA
   # provenance). id-token mints the workload identity, attestations persists it.
   id-token: write
@@ -24,6 +25,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Fetch spike Rust artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 45665539613 --repo "$GITHUB_REPOSITORY" \
+            --name spike-android-rust --dir spike-rust
+          mkdir -p app/src/main/jniLibs/arm64-v8a app/src/main/kotlin/uniffi/foxy_spike_codec
+          cp spike-rust/android-jniLibs/arm64-v8a/libfoxy_spike_codec.so \
+            app/src/main/jniLibs/arm64-v8a/
+          cp spike-rust/out/android-kotlin/uniffi/foxy_spike_codec/foxy_spike_codec.kt \
+            app/src/main/kotlin/uniffi/foxy_spike_codec/
 
       - name: Set up Java
         uses: actions/setup-java@v5

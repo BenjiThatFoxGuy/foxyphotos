@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   verify-ios:
@@ -16,6 +17,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+
+      - name: Fetch spike Rust artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 45665539613 --repo "$GITHUB_REPOSITORY" \
+            --name spike-ios-rust --dir spike-rust
+          mkdir -p iosApp/Rust
+          cp -R spike-rust/xcframework/foxy_spike_codec.xcframework iosApp/Rust/
+          cp spike-rust/out/swift/foxy_spike_codec.swift iosApp/iosApp/RustCodec.swift
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -93,6 +104,16 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+
+      - name: Fetch spike Rust artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 45665539613 --repo "$GITHUB_REPOSITORY" \
+            --name spike-ios-rust --dir spike-rust
+          mkdir -p iosApp/Rust
+          cp -R spike-rust/xcframework/foxy_spike_codec.xcframework iosApp/Rust/
+          cp spike-rust/out/swift/foxy_spike_codec.swift iosApp/iosApp/RustCodec.swift
 
       - name: Set up Java
         uses: actions/setup-java@v5

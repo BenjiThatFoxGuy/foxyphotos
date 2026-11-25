@@ -79,6 +79,8 @@ targets:
         embedType: embed
       - framework: ../provider/google-core/build/bin/iosSimulatorArm64/debugFramework/FoxyPhotosGoogleCore.framework
         embedType: embed
+      - framework: Rust/foxy_spike_codec.xcframework
+        embedType: embed
       - target: FoxyPhotosLiveActivity
 
   FoxyPhotosDevice:
@@ -133,6 +135,8 @@ targets:
       - framework: ../provider/foundation/build/bin/iosArm64/debugFramework/FoxyPhotosFoundation.framework
         embedType: embed
       - framework: ../provider/google-core/build/bin/iosArm64/debugFramework/FoxyPhotosGoogleCore.framework
+        embedType: embed
+      - framework: Rust/foxy_spike_codec.xcframework
         embedType: embed
       - target: FoxyPhotosLiveActivity
 
