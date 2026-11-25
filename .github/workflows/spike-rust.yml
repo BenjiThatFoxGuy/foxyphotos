@@ -29,6 +29,8 @@ jobs:
         run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.so --language swift --out-dir out/swift
       - name: Show generated surface
         run: find out -type f | sort && echo '--- kotlin ---' && sed -n '1,120p' $(find out/kotlin -name '*.kt' | head -1) && echo '--- swift ---' && sed -n '1,120p' $(find out/swift -name '*.swift' | head -1)
+      - name: Kotlin caller test
+        run: ../../gradlew -p callers/kotlin test --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: spike-bindings
@@ -49,5 +51,10 @@ jobs:
         run: cargo build --release
       - name: Generate Swift bindings
         run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.dylib --language swift --out-dir out/swift
-      - name: Parse generated Swift
-        run: swiftc -parse $(find out/swift -name '*.swift' | head -1)
+      - name: Compile and run Swift caller
+        run: |
+          swiftc -o out/swift-spike \
+            callers/swift/main.swift \
+            $(find out/swift -name '*.swift' | head -1) \
+            -I out/swift -L target/release -lfoxy_spike_codec
+          out/swift-spike
