@@ -5,6 +5,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: read
@@ -94,6 +95,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Android takes versionName from the v* tag and versionCode from the run
+      # number. Derive the IPA the same way so both app files stay in step.
+      - name: Resolve app version
+        id: app_version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            marketing="${GITHUB_REF#refs/tags/v}"
+          else
+            base="$(sed -n '1s/^v//p' VERSION)"
+            marketing="${base}-nightly.${GITHUB_SHA::7}"
+          fi
+          echo "marketing=$marketing" >> "$GITHUB_OUTPUT"
+          echo "build=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "IPA version: $marketing ($GITHUB_RUN_NUMBER)"
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
@@ -133,7 +150,9 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            MARKETING_VERSION=${{ steps.app_version.outputs.marketing }} \
+            CURRENT_PROJECT_VERSION=${{ steps.app_version.outputs.build }}
 
       # An .ipa is just Payload/<App>.app zipped. ExportArchive needs a provisioning
       # profile, so the archive is packaged by hand. The Live Activity extension is
