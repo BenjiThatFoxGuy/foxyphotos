@@ -1,0 +1,51 @@
+name: Spike Rust UniFFI codec
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-bindings:
+    name: Rust tests and generated bindings
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: spikes/001-rust-uniffi-codec
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust unit tests
+        run: cargo test --locked 2>/dev/null || cargo test
+      - name: Build cdylib
+        run: cargo build --release
+      - name: Generate Kotlin bindings
+        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.so --language kotlin --out-dir out/kotlin
+      - name: Generate Swift bindings
+        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.so --language swift --out-dir out/swift
+      - name: Show generated surface
+        run: find out -type f | sort && echo '--- kotlin ---' && sed -n '1,120p' $(find out/kotlin -name '*.kt' | head -1) && echo '--- swift ---' && sed -n '1,120p' $(find out/swift -name '*.swift' | head -1)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spike-bindings
+          path: spikes/001-rust-uniffi-codec/out
+          if-no-files-found: error
+
+  swift-caller:
+    name: Swift parses generated bindings
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: spikes/001-rust-uniffi-codec
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build static library
+        run: cargo build --release
+      - name: Generate Swift bindings
+        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.dylib --language swift --out-dir out/swift
+      - name: Parse generated Swift
+        run: swiftc -parse $(find out/swift -name '*.swift' | head -1)
