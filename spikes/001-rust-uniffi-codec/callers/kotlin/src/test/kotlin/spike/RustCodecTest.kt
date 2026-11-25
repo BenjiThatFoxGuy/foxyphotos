@@ -10,13 +10,13 @@ class RustCodecTest {
     private fun bytesField(number: Int, value: ByteArray): ByteArray {
         val out = mutableListOf<Byte>()
         var tag = (number shl 3) or 2
-        while (tag and 0xffff_ff80 != 0) {
+        while (tag and 0xffff_ff80.toInt() != 0) {
             out.add(((tag and 0x7f) or 0x80).toByte())
             tag = tag ushr 7
         }
         out.add(tag.toByte())
         var length = value.size
-        while (length and 0xffff_ff80 != 0) {
+        while (length and 0xffff_ff80.toInt() != 0) {
             out.add(((length and 0x7f) or 0x80).toByte())
             length = length ushr 7
         }

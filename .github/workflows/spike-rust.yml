@@ -56,5 +56,6 @@ jobs:
           swiftc -o out/swift-spike \
             callers/swift/main.swift \
             $(find out/swift -name '*.swift' | head -1) \
-            -I out/swift -L target/release -lfoxy_spike_codec
+            -I out/swift -fmodule-map-file=out/swift/foxy_spike_codecFFI.modulemap \
+            -L target/release -lfoxy_spike_codec
           out/swift-spike
