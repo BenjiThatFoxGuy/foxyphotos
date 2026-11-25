@@ -59,7 +59,7 @@ struct Fields(std::collections::HashMap<u32, Vec<Value>>);
 
 impl Fields {
     fn parse(data: &[u8]) -> Result<Self, CodecError> {
-        let mut fields = std::collections::HashMap::new();
+        let mut fields: std::collections::HashMap<u32, Vec<Value>> = std::collections::HashMap::new();
         let mut offset = 0usize;
         while offset < data.len() {
             let (tag, next) = read_varint(data, offset)?;
@@ -138,7 +138,8 @@ fn read_varint(data: &[u8], start: usize) -> Result<(u64, usize), CodecError> {
 #[uniffi::export]
 pub fn hash_check_codec(sha1: Vec<u8>) -> Vec<u8> {
     let inner = bytes_field(1, &sha1);
-    let request = bytes_field(1, &inner) + bytes_field(2, &[]);
+    let mut request = bytes_field(1, &inner);
+    request.extend(bytes_field(2, &[]));
     bytes_field(1, &request)
 }
 
