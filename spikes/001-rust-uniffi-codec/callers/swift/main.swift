@@ -22,7 +22,8 @@ let encoded = Array(try encodeUploadTokenRequest(fileSize: 123))
 precondition(encoded == expectedToken, "upload token bytes differ: \(encoded)")
 
 let committed = bytesField(1, bytesField(3, bytesField(1, Array("media-key".utf8))))
-precondition(try decodeCommittedMediaKey(response: Data(committed)) == "media-key")
+let key = try decodeCommittedMediaKey(response: Data(committed))
+precondition(key == "media-key")
 
 let unrelated = bytesField(4, Array("media-key".utf8))
 do {
