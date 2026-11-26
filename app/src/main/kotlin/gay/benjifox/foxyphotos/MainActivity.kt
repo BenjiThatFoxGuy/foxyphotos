@@ -26,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,7 +77,12 @@ class MainActivity : ComponentActivity() {
         } catch (t: Throwable) {
             android.util.Log.d("SpikeRust", "RUST_CODEC_ANDROID unavailable: ${t.message}")
         }
-        setContent { MaterialTheme(colorScheme = darkColorScheme()) { FoxyPhotosApp() } }
+        setContent {
+            val colors = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                dynamicDarkColorScheme(this@MainActivity)
+            } else darkColorScheme()
+            MaterialTheme(colorScheme = colors) { FoxyPhotosApp() }
+        }
     }
 }
 
@@ -334,125 +341,183 @@ private fun FoxyPhotosApp() {
             BackupPolicyControls()
         }
     }
-    Scaffold { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            if (screen == "main" && mode == "Modern") {
-                androidx.compose.material3.TopAppBar(
-                    windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
-                    title = {
-                        Column {
-                            Text("FoxyPhotos", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                if (backupState.phase == BackupPhase.IDLE) {
-                                    libraryMode.title
-                                } else backupState.phase.title,
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+    if (screen == "folders") {
+        Scaffold { padding ->
+            Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+                TextButton(onClick = { screen = "main" }) { Text("Back") }
+                Text("${selectedFolders.size} selected")
+                TextButton(enabled = selectedFolders.isNotEmpty(), onClick = { persistFolders(emptySet()) }) {
+                    Text("Clear selection")
+                }
+                if (!mediaGranted) {
+                    TextButton(onClick = { permissionLauncher.launch(requiredPermissions) }) {
+                        Text("Allow photos access")
+                    }
+                }
+                scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(folders, key = { it.relativePath }) { folder ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = folder.relativePath in selectedFolders,
+                                onCheckedChange = { checked ->
+                                    persistFolders(
+                                        if (checked) selectedFolders + folder.relativePath
+                                        else selectedFolders - folder.relativePath
+                                    )
+                                },
                             )
-                        }
-                    },
-                    actions = {
-                        LibraryModeMenu(libraryMode, ::selectLibraryMode)
-                        ProfileControl(configuredAccount, onSettings = { screen = "settings" }, backupControls = {
-                            if (updateState.release != null) TextButton(onClick = { screen = "settings" }) { Text("Update available") }
-                            if (backupState.total > 0) {
-                                val processed = backupCounts.uploaded + backupCounts.alreadyPresent + backupCounts.failed + backupCounts.uncertain
-                                Text("$processed of ${backupState.total} processed", style = MaterialTheme.typography.bodySmall)
-                                androidx.compose.material3.LinearProgressIndicator(
-                                    progress = { (processed.toFloat() / backupState.total).coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                            Column(Modifier.weight(1f)) {
+                                Text(folder.relativePath, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("${folder.itemCount} items", style = MaterialTheme.typography.bodySmall)
                             }
-                            controls()
-                        })
-                    },
-                )
-            } else Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (screen != "main") TextButton(onClick = { screen = if (screen == "folders" || screen == "connect") "settings" else "main" }) { Text("Back") }
-                Text(when (screen) { "settings" -> "Settings"; "folders" -> "Backup folders"; "connect" -> "Connect"; else -> "FoxyPhotos" },
-                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                if (screen == "main") {
-                    LibraryModeMenu(libraryMode, ::selectLibraryMode)
-                    ProfileControl(configuredAccount)
-                    IconButton(onClick = { screen = "settings" }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Text(if (updateState.release != null) "⚙ •" else "⚙", style = MaterialTheme.typography.headlineMedium) }
+                        }
+                    }
                 }
             }
-            if (screen == "albums") {
-                Box(Modifier.weight(1f)) { AlbumBrowser() }
-            } else if (screen == "cleanup") {
-                Box(Modifier.weight(1f)) { VerifiedCleanupScreen() }
-            } else if (screen == "main") {
-                if (mode != "Modern") {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Simple", style = MaterialTheme.typography.labelLarge)
-                        controls()
-                        if (!notificationsEnabled) TextButton(onClick = {
-                            context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
-                        }) { Text("Enable notifications") }
+        }
+        return
+    }
+    if (screen == "albums") {
+        Scaffold { padding ->
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                TextButton(onClick = { screen = "main" }) { Text("Back") }
+                Box(Modifier.fillMaxSize()) { AlbumBrowser() }
+            }
+        }
+        return
+    }
+    if (screen == "settings") {
+        Scaffold { padding ->
+            LazyColumn(
+                Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item { TextButton(onClick = { screen = "main" }) { Text("Back") } }
+                item { UpdateControls(updater) }
+                item { FolderAlbumSettings(open = { screen = "albums" }) }
+                item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
+                item { LibraryModeChoices(libraryMode, ::selectLibraryMode) }
+                item { TextButton(onClick = { showLogs = true }) { Text("View logs...") } }
+                item { TextButton(onClick = { onboardingStep = 0; onboarding = true }) { Text("Setup") } }
+                item { credentialForm() }
+            }
+        }
+        return
+    }
+    Scaffold { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            LaunchedEffect(Unit) { scanFolders() }
+            androidx.compose.material3.TopAppBar(
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+                title = {
+                    Column {
+                        Text("FoxyPhotos", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            if (backupState.phase == BackupPhase.IDLE) libraryMode.title else backupState.phase.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                }
-                Box(Modifier.weight(1f)) {
-                    androidx.compose.runtime.key(libraryMode) {
-                        if (libraryMode.includeLocal) {
-                            gallerySavedState.SaveableStateProvider("gallery") {
-                                LocalGallery(Modifier.fillMaxSize(), gridState = galleryGridState, onPermission = { permissionLauncher.launch(requiredPermissions) })
-                            }
-                        } else if (libraryMode == gay.benjifox.foxyphotos.core.model.LibraryMode.ICLOUD_ONLY) {
-                            // iCloud-only: browse iCloud Photos, with no Google or local references.
-                            ICloudLibraryControls(remember { ICloudSourceState() })
-                        } else {
-                            CombinedLibrary(
-                                onPermission = { permissionLauncher.launch(requiredPermissions) },
-                                includeLocal = libraryMode.includeLocal, includeGoogle = libraryMode.includeGoogle,
-                                includeICloud = libraryMode.includeICloud,
+                },
+                actions = {
+                    LibraryModeMenu(libraryMode, ::selectLibraryMode)
+                    ProfileControl(configuredAccount, onSettings = { screen = "settings" }, backupControls = {
+                        if (updateState.release != null) TextButton(onClick = { screen = "settings" }) { Text("Update available") }
+                        if (backupState.total > 0) {
+                            val processed = backupCounts.uploaded + backupCounts.alreadyPresent + backupCounts.failed + backupCounts.uncertain
+                            Text("$processed of ${backupState.total} processed", style = MaterialTheme.typography.bodySmall)
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { (processed.toFloat() / backupState.total).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
+                        controls()
+                    })
+                },
+            )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().imePadding(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    Section("Photos access") {
+                        Text(if (mediaGranted) "Access granted" else "Allow FoxyPhotos to see your photos.")
+                        if (!mediaGranted) {
+                            Button(onClick = { permissionLauncher.launch(requiredPermissions) }) { Text("Allow photos access") }
+                            scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        }
                     }
                 }
-            } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                when (screen) {
-                    "settings" -> {
-                        item { UpdateControls(updater) }
-                        item { FolderAlbumSettings(open = { screen = "albums" }) }
-                        item { Text("App mode", style = MaterialTheme.typography.titleMedium); ModeChoices(mode, ::selectMode) }
-                        item { LibraryModeChoices(libraryMode, ::selectLibraryMode) }
-                        if (libraryMode.includeICloud) item { ICloudSessionSetup() }
-                        item { TextButton(onClick = { screen = "cleanup" }) { Text("Experimental verified local cleanup") } }
-                        item { BackupConditionSettings() }
-                        item { TextButton(onClick = { screen = "folders" }) { Text("Backup folders") } }
-                        item { TextButton(onClick = { showLogs = true }) { Text("View logs...") } }
-                        item { TextButton(onClick = { onboardingStep = 0; onboarding = true }) { Text("Setup") } }
-                        item { TextButton(onClick = { screen = "connect" }) { Text(if (!googleBackupConfigured) "Connect Google Photos" else "Reconnect Google Photos") } }
-                    }
-                    "connect" -> item { credentialForm() }
-                    "folders" -> {
-                        item {
-                            Text("${selectedFolders.size} selected")
-                            TextButton(enabled = selectedFolders.isNotEmpty(), onClick = { persistFolders(emptySet()) }) { Text("Clear selection") }
-                            if (!mediaGranted) TextButton(onClick = { permissionLauncher.launch(requiredPermissions) }) { Text("Allow photos access") }
-                            scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                            if (folders.isEmpty() && scanError == null) Text("No folders available")
-                        }
-                        items(folders, key = { it.relativePath }) { folder ->
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(folder.relativePath in selectedFolders, onCheckedChange = { checked ->
-                                    persistFolders(if (checked) selectedFolders + folder.relativePath else selectedFolders - folder.relativePath)
-                                })
-                                Column(Modifier.weight(1f)) {
-                                    Text(folder.relativePath, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text("${folder.itemCount} items", style = MaterialTheme.typography.bodySmall)
+                item {
+                    Section("Albums to back up") {
+                        Text(
+                            "${selectedFolders.size} of ${folders.size} albums selected",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (folders.isEmpty()) {
+                            Text("No albums found yet.", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            folders.take(10).forEach { folder ->
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(
+                                        checked = folder.relativePath in selectedFolders,
+                                        onCheckedChange = { checked ->
+                                            persistFolders(
+                                                if (checked) selectedFolders + folder.relativePath
+                                                else selectedFolders - folder.relativePath
+                                            )
+                                        },
+                                    )
+                                    Text(folder.relativePath, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${folder.itemCount}", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
+                        TextButton(onClick = { screen = "folders" }) { Text("Choose albums") }
                     }
-                    else -> {
-                        item { Text("Simple", style = MaterialTheme.typography.labelLarge); controls() }
-                        if (!notificationsEnabled) item {
-                            TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }) { Text("Enable notifications") }
+                }
+                item {
+                    Section("Backup provider") {
+                        Text(
+                            if (googleBackupConfigured) "Google Photos connected" else "Connect Google Photos to back up.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        configuredAccount?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        var showCredential by remember { mutableStateOf(false) }
+                        if (showCredential) credentialForm()
+                        else TextButton(onClick = { showCredential = true }) {
+                            Text(if (googleBackupConfigured) "Reconnect" else "Connect")
                         }
                     }
                 }
+                item { Section("Backup") { controls() } }
+                item {
+                    Section("Library") {
+                        TextButton(onClick = { screen = "albums" }) { Text("Google albums") }
+                        TextButton(onClick = { showLogs = true }) { Text("Diagnostics") }
+                        TextButton(onClick = { onboardingStep = 0; onboarding = true }) { Text("Rerun setup") }
+                    }
+                }
             }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun Section(
+    title: String,
+    content: @androidx.compose.runtime.Composable ColumnScope.() -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            content()
         }
     }
 }
