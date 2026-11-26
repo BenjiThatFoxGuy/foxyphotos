@@ -12,7 +12,7 @@ kotlin {
 
 sourceSets {
     main {
-        kotlin.srcDir("../../out/kotlin/uniffi/foxy_spike_codec")
+        kotlin.srcDir("../../out/kotlin/uniffi/foxy_codec")
     }
 }
 

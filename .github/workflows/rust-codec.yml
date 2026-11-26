@@ -1,9 +1,9 @@
-name: Spike Rust UniFFI codec
+name: Foxy codec
 
 on:
   workflow_dispatch:
   push:
-    branches: [spike/rust-uniffi-codec]
+    branches: [rust/codec-migration]
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: spikes/001-rust-uniffi-codec
+        working-directory: core/rust/foxy-codec
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -24,17 +24,17 @@ jobs:
       - name: Build cdylib
         run: cargo build --release
       - name: Generate Kotlin bindings
-        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.so --language kotlin --out-dir out/kotlin
+        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_codec.so --language kotlin --out-dir out/kotlin
       - name: Generate Swift bindings
-        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.so --language swift --out-dir out/swift
+        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_codec.so --language swift --out-dir out/swift
       - name: Show generated surface
         run: find out -type f | sort && echo '--- kotlin ---' && sed -n '1,120p' $(find out/kotlin -name '*.kt' | head -1) && echo '--- swift ---' && sed -n '1,120p' $(find out/swift -name '*.swift' | head -1)
       - name: Kotlin caller test
-        run: ../../gradlew -p callers/kotlin test --no-daemon
+        run: ../../../gradlew -p callers/kotlin test --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: spike-bindings
-          path: spikes/001-rust-uniffi-codec/out
+          name: codec-bindings
+          path: core/rust/foxy-codec/out
           if-no-files-found: error
 
   swift-caller:
@@ -43,19 +43,19 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: spikes/001-rust-uniffi-codec
+        working-directory: core/rust/foxy-codec
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Build static library
         run: cargo build --release
       - name: Generate Swift bindings
-        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_spike_codec.dylib --language swift --out-dir out/swift
+        run: cargo run --bin uniffi-bindgen -- generate --library target/release/libfoxy_codec.dylib --language swift --out-dir out/swift
       - name: Compile and run Swift caller
         run: |
-          swiftc -o out/swift-spike \
+          swiftc -o out/swift-caller \
             callers/swift/main.swift \
             $(find out/swift -name '*.swift' | head -1) \
-            -I out/swift -Xcc -fmodule-map-file=out/swift/foxy_spike_codecFFI.modulemap \
-            -L target/release -lfoxy_spike_codec
-          out/swift-spike
+            -I out/swift -Xcc -fmodule-map-file=out/swift/foxy_codecFFI.modulemap \
+            -L target/release -lfoxy_codec
+          out/swift-caller

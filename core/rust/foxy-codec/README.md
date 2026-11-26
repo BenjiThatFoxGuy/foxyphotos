@@ -1,6 +1,6 @@
-# 001: Rust core via UniFFI, full-pipeline spike
+# Foxy codec: shared Google Photos wire codec via UniFFI
 
-Throwaway. Not production code. Branch `spike/rust-uniffi-codec`.
+Throwaway. Not production code. Branch `rust/codec-migration`.
 
 ## Question
 
@@ -37,7 +37,7 @@ separately.
 - Android NDK arm64 `.so` builds (`cargo ndk`) and Kotlin bindings generate from it; CI run `45669297188`.
 - iOS XCFramework builds for device and simulator and generates Swift bindings; same CI run.
 - Both real apps build with the Rust library linked: Android `45670764342`, iOS `45670769745`.
-- APK contains `lib/arm64-v8a/libfoxy_spike_codec.so`; IPA binary contains Rust/UniFFI symbols and the spike log string.
+- APK contains `lib/arm64-v8a/libfoxy_codec.so`; IPA binary contains Rust/UniFFI symbols and the codec log string.
 - Still untested: a real device launch of either nightly, and non-arm64 Android ABIs.
 
 ### Recommendation for the real build

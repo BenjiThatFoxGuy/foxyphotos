@@ -68,12 +68,12 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Throwaway spike: force the Rust codec into the device build.
+        // Force the Rust codec into the device build.
         try {
-            val bytes = uniffi.foxy_spike_codec.encodeUploadTokenRequest(1u)
-            android.util.Log.d("SpikeRust", "RUST_SPIKE_ANDROID ${bytes.size} bytes")
+            val bytes = uniffi.foxy_codec.encodeUploadTokenRequest(1u)
+            android.util.Log.d("SpikeRust", "RUST_CODEC_ANDROID ${bytes.size} bytes")
         } catch (t: Throwable) {
-            android.util.Log.d("SpikeRust", "RUST_SPIKE_ANDROID unavailable: ${t.message}")
+            android.util.Log.d("SpikeRust", "RUST_CODEC_ANDROID unavailable: ${t.message}")
         }
         setContent { MaterialTheme(colorScheme = darkColorScheme()) { FoxyPhotosApp() } }
     }

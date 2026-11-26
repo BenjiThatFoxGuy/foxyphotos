@@ -1,7 +1,7 @@
 package spike
 
-import uniffi.foxy_spike_codec.decodeCommittedMediaKey
-import uniffi.foxy_spike_codec.encodeUploadTokenRequest
+import uniffi.foxy_codec.decodeCommittedMediaKey
+import uniffi.foxy_codec.encodeUploadTokenRequest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

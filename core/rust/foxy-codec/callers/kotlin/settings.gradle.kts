@@ -6,4 +6,4 @@ pluginManagement {
     }
 }
 
-rootProject.name = "spike-rust-kotlin-caller"
+rootProject.name = "rust-codec-kotlin-caller"

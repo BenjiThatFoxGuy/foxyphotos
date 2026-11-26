@@ -1,10 +1,10 @@
 [package]
-name = "foxy_spike_codec"
+name = "foxy_codec"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "foxy_spike_codec"
+name = "foxy_codec"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]

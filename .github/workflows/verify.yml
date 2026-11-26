@@ -26,18 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Fetch spike Rust artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 45665539613 --repo "$GITHUB_REPOSITORY" \
-            --name spike-android-rust --dir spike-rust
-          mkdir -p app/src/main/jniLibs/arm64-v8a app/src/main/kotlin/uniffi/foxy_spike_codec
-          cp spike-rust/android-jniLibs/arm64-v8a/libfoxy_spike_codec.so \
-            app/src/main/jniLibs/arm64-v8a/
-          cp spike-rust/out/android-kotlin/uniffi/foxy_spike_codec/foxy_spike_codec.kt \
-            app/src/main/kotlin/uniffi/foxy_spike_codec/
-
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
@@ -54,9 +42,23 @@ jobs:
         uses: android-actions/setup-android@v4
         with:
           cmdline-tools-version: 16111833
-          packages: platform-tools platforms;android-36 build-tools;36.0.0
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.2.12479018
           accept-android-sdk-licenses: false
           log-accepted-android-sdk-licenses: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Build Rust codec for Android
+        working-directory: core/rust/foxy-codec
+        run: |
+          cargo install cargo-ndk --locked
+          export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+          cargo ndk -t arm64-v8a -o ../../../app/src/main/jniLibs build --release
+          cargo run --bin uniffi-bindgen -- generate \
+            --library ../../../app/src/main/jniLibs/arm64-v8a/libfoxy_codec.so \
+            --language kotlin --out-dir ../../../app/src/main/kotlin
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5

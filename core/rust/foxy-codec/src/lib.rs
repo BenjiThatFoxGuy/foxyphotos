@@ -1,4 +1,4 @@
-//! Throwaway spike: the Google Photos wire codec, ported from Kotlin to Rust.
+//! Shared Google Photos wire codec, ported from Kotlin to Rust.
 //! Same byte layout as provider/google-core/GoogleNativeProtocol.kt.
 
 uniffi::setup_scaffolding!();

@@ -18,15 +18,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Fetch spike Rust artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Build Rust codec for iOS
+        working-directory: core/rust/foxy-codec
         run: |
-          gh run download 45669297188 --repo "$GITHUB_REPOSITORY" \
-            --name spike-ios-rust --dir spike-rust
-          mkdir -p iosApp/Rust
-          cp -R spike-rust/xcframework/foxy_spike_codec.xcframework iosApp/Rust/
-          cp spike-rust/out/swift/foxy_spike_codec.swift iosApp/iosApp/RustCodec.swift
+          cargo build --release
+          cargo build --release --target aarch64-apple-ios
+          cargo build --release --target aarch64-apple-ios-sim
+          cargo run --bin uniffi-bindgen -- generate \
+            --library target/release/libfoxy_codec.dylib \
+            --language swift --out-dir out/swift
+          mkdir -p ../../../iosApp/Rust
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libfoxy_codec.a \
+            -headers out/swift \
+            -library target/aarch64-apple-ios-sim/release/libfoxy_codec.a \
+            -headers out/swift \
+            -output ../../../iosApp/Rust/foxy_codec.xcframework
+          find ../../../iosApp/Rust/foxy_codec.xcframework -type d -name Headers \
+            -exec cp out/swift/foxy_codecFFI.modulemap {}/module.modulemap \;
+          cp out/swift/foxy_codec.swift ../../../iosApp/iosApp/RustCodec.swift
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -105,15 +119,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Fetch spike Rust artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Build Rust codec for iOS
+        working-directory: core/rust/foxy-codec
         run: |
-          gh run download 45669297188 --repo "$GITHUB_REPOSITORY" \
-            --name spike-ios-rust --dir spike-rust
-          mkdir -p iosApp/Rust
-          cp -R spike-rust/xcframework/foxy_spike_codec.xcframework iosApp/Rust/
-          cp spike-rust/out/swift/foxy_spike_codec.swift iosApp/iosApp/RustCodec.swift
+          cargo build --release
+          cargo build --release --target aarch64-apple-ios
+          cargo build --release --target aarch64-apple-ios-sim
+          cargo run --bin uniffi-bindgen -- generate \
+            --library target/release/libfoxy_codec.dylib \
+            --language swift --out-dir out/swift
+          mkdir -p ../../../iosApp/Rust
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libfoxy_codec.a \
+            -headers out/swift \
+            -library target/aarch64-apple-ios-sim/release/libfoxy_codec.a \
+            -headers out/swift \
+            -output ../../../iosApp/Rust/foxy_codec.xcframework
+          find ../../../iosApp/Rust/foxy_codec.xcframework -type d -name Headers \
+            -exec cp out/swift/foxy_codecFFI.modulemap {}/module.modulemap \;
+          cp out/swift/foxy_codec.swift ../../../iosApp/iosApp/RustCodec.swift
 
       - name: Set up Java
         uses: actions/setup-java@v5

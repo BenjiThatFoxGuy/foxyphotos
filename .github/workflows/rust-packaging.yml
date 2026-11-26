@@ -1,8 +1,8 @@
-name: Spike Rust packaging
+name: Rust codec packaging
 
 on:
   push:
-    branches: [spike/rust-uniffi-codec]
+    branches: [rust/codec-migration]
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 40
     defaults:
       run:
-        working-directory: spikes/001-rust-uniffi-codec
+        working-directory: core/rust/foxy-codec
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -41,18 +41,18 @@ jobs:
           cargo ndk -t arm64-v8a -o android-jniLibs build --release
       - name: Verify library and generate Kotlin bindings
         run: |
-          file android-jniLibs/arm64-v8a/libfoxy_spike_codec.so
+          file android-jniLibs/arm64-v8a/libfoxy_codec.so
           cargo run --bin uniffi-bindgen -- generate \
-            --library android-jniLibs/arm64-v8a/libfoxy_spike_codec.so \
+            --library android-jniLibs/arm64-v8a/libfoxy_codec.so \
             --language kotlin --out-dir out/android-kotlin
           echo '--- generated API ---'
           grep -nE '^fun |^public fun |^object |^class ' $(find out/android-kotlin -name '*.kt' | head -1) | tail -20
       - uses: actions/upload-artifact@v4
         with:
-          name: spike-android-rust
+          name: codec-android-rust
           path: |
-            spikes/001-rust-uniffi-codec/android-jniLibs
-            spikes/001-rust-uniffi-codec/out/android-kotlin
+            core/rust/foxy-codec/android-jniLibs
+            core/rust/foxy-codec/out/android-kotlin
           if-no-files-found: error
 
   ios-xcframework:
@@ -61,7 +61,7 @@ jobs:
     timeout-minutes: 40
     defaults:
       run:
-        working-directory: spikes/001-rust-uniffi-codec
+        working-directory: core/rust/foxy-codec
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -75,23 +75,23 @@ jobs:
         run: |
           cargo build --release
           cargo run --bin uniffi-bindgen -- generate \
-            --library target/release/libfoxy_spike_codec.dylib \
+            --library target/release/libfoxy_codec.dylib \
             --language swift --out-dir out/swift
       - name: Create XCFramework
         run: |
           mkdir -p xcframework
           xcodebuild -create-xcframework \
-            -library target/aarch64-apple-ios/release/libfoxy_spike_codec.a \
+            -library target/aarch64-apple-ios/release/libfoxy_codec.a \
             -headers out/swift \
-            -library target/aarch64-apple-ios-sim/release/libfoxy_spike_codec.a \
+            -library target/aarch64-apple-ios-sim/release/libfoxy_codec.a \
             -headers out/swift \
-            -output xcframework/foxy_spike_codec.xcframework
-          find xcframework/foxy_spike_codec.xcframework -type d -name Headers \
-            -exec cp out/swift/foxy_spike_codecFFI.modulemap {}/module.modulemap \;
+            -output xcframework/foxy_codec.xcframework
+          find xcframework/foxy_codec.xcframework -type d -name Headers \
+            -exec cp out/swift/foxy_codecFFI.modulemap {}/module.modulemap \;
       - uses: actions/upload-artifact@v4
         with:
-          name: spike-ios-rust
+          name: codec-ios-rust
           path: |
-            spikes/001-rust-uniffi-codec/xcframework
-            spikes/001-rust-uniffi-codec/out/swift
+            core/rust/foxy-codec/xcframework
+            core/rust/foxy-codec/out/swift
           if-no-files-found: error
