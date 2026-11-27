@@ -21,7 +21,8 @@ data class LocalMedia(
     val uri: Uri,
     val displayName: String,
     val sizeBytes: Long,
-    val modifiedEpochSeconds: Long,
+    /** Original capture time in epoch seconds, used as the upload's filedate. */
+    val captureEpochSeconds: Long,
     val relativePath: String,
 )
 
@@ -48,7 +49,7 @@ class MediaStoreFolderScanner(
         buildList {
             scanMediaCollection(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, selectedFolders, this)
             scanMediaCollection(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, selectedFolders, this)
-        }.sortedBy(LocalMedia::modifiedEpochSeconds)
+        }.sortedBy(LocalMedia::captureEpochSeconds)
     }
 
     /** Query only the explicit URI whitelist, without expanding to containing folders. */
@@ -70,10 +71,12 @@ class MediaStoreFolderScanner(
                         val uri = Uri.parse(raw)
                         require(uri.scheme == "content" && uri.authority == "media")
                         val columns = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE,
-                            MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.RELATIVE_PATH)
+                            MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.RELATIVE_PATH,
+                            MediaStore.MediaColumns.DATE_TAKEN)
                         val item = contentResolver.query(uri, columns, "${MediaStore.MediaColumns.IS_PENDING} = 0", null, null, signal)?.use { c ->
                             check(c.moveToFirst()) { "Selected media unavailable" }
-                            LocalMedia(uri, c.getString(0), c.getLong(1), c.getLong(2), c.getString(3)?.ifBlank { "Unsorted media" } ?: "Unsorted media")
+                            LocalMedia(uri, c.getString(0), c.getLong(1), captureEpochSeconds(c.getLong(4), c.getLong(2)),
+                                c.getString(3)?.ifBlank { "Unsorted media" } ?: "Unsorted media")
                         } ?: throw IllegalStateException("Selected media unavailable")
                         currentCoroutineContext().ensureActive()
                         if (allowedFolders == null || item.relativePath in allowedFolders) add(item)
@@ -114,6 +117,7 @@ class MediaStoreFolderScanner(
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.MediaColumns.DATE_TAKEN,
         )
         contentResolver.query(collection, projection, "${MediaStore.MediaColumns.IS_PENDING} = 0", null, null)?.use { cursor ->
             val id = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
@@ -121,6 +125,7 @@ class MediaStoreFolderScanner(
             val size = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
             val modified = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val path = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+            val taken = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN)
             while (cursor.moveToNext()) {
                 currentCoroutineContext().ensureActive()
                 val relativePath = cursor.getString(path)?.ifBlank { "Unsorted media" } ?: "Unsorted media"
@@ -129,13 +134,21 @@ class MediaStoreFolderScanner(
                         uri = Uri.withAppendedPath(collection, cursor.getLong(id).toString()),
                         displayName = cursor.getString(name),
                         sizeBytes = cursor.getLong(size),
-                        modifiedEpochSeconds = cursor.getLong(modified),
+                        captureEpochSeconds = captureEpochSeconds(cursor.getLong(taken), cursor.getLong(modified)),
                         relativePath = relativePath,
                     )
                 }
             }
         }
     }
+
+    /**
+     * MediaStore reports DATE_TAKEN in milliseconds and DATE_MODIFIED in seconds.
+     * Prefer the capture date so an upload keeps the original filedate; fall back
+     * to the modification date when a file has no capture date at all.
+     */
+    private fun captureEpochSeconds(takenMillis: Long, modifiedSeconds: Long): Long =
+        if (takenMillis > 0) takenMillis / 1000 else modifiedSeconds
 
     private suspend fun scanCollection(
         collection: android.net.Uri,

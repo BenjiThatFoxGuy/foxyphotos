@@ -22,7 +22,7 @@ private struct StagedAsset {
     let size: Int64
     let sha1: String
     let sha256: String
-    let modifiedSeconds: Int64
+    let captureSeconds: Int64
     let safeToDelete: Bool
 }
 
@@ -122,7 +122,7 @@ private func stage(_ asset: PHAsset) async throws -> StagedAsset {
                 size: size,
                 sha1: sha1.finalize().map { String(format: "%02x", $0) }.joined(),
                 sha256: sha256.finalize().map { String(format: "%02x", $0) }.joined(),
-                modifiedSeconds: Int64((asset.modificationDate ?? asset.creationDate ?? Date()).timeIntervalSince1970),
+                captureSeconds: Int64((asset.creationDate ?? asset.modificationDate ?? Date()).timeIntervalSince1970),
                 safeToDelete: safeToDelete
             )
         }.value
@@ -260,7 +260,7 @@ final class IOSBackupSession {
                     let receipt = try await bridge.upload(
                         credentialForm: credential, filePath: staged.url.path,
                         fileName: staged.filename, sizeBytes: staged.size,
-                        modifiedEpochSeconds: staged.modifiedSeconds, sha1Hex: staged.sha1
+                        modifiedEpochSeconds: staged.captureSeconds, sha1Hex: staged.sha1
                     )
                     try journal.record(staged.sha256, providerKey: receipt.mediaKey)
                     confirmed += 1

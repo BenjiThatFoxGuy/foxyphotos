@@ -20,7 +20,7 @@ class BackupPolicyIntegrationTest {
             override fun onCreate() = true
             override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?): android.database.Cursor {
                 queried += uri.toString()
-                return android.database.MatrixCursor(projection!!).apply { addRow(arrayOf<Any>("item.jpg", 10L, 100L, "Excluded/")) }
+                return android.database.MatrixCursor(projection!!).apply { addRow(arrayOf<Any>("item.jpg", 10L, 100L, "Excluded/", 0L)) }
             }
             override fun getType(uri: android.net.Uri) = null
             override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
@@ -108,7 +108,7 @@ class BackupPolicyIntegrationTest {
             override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?): android.database.Cursor {
                 queried += uri.lastPathSegment!!
                 if (uri.lastPathSegment == "1") throw SecurityException("unavailable")
-                return android.database.MatrixCursor(projection!!).apply { addRow(arrayOf<Any>("item.jpg", 10L, 100L, if (uri.lastPathSegment == "2") "Camera/" else "Excluded/")) }
+                return android.database.MatrixCursor(projection!!).apply { addRow(arrayOf<Any>("item.jpg", 10L, 100L, if (uri.lastPathSegment == "2") "Camera/" else "Excluded/", 0L)) }
             }
             override fun getType(uri: android.net.Uri) = null
             override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
@@ -210,5 +210,26 @@ class BackupPolicyIntegrationTest {
         prefs.edit().putString("app-mode", "Simple").commit()
         BackupScheduling.refresh(context)
         assertNull(jobs.getPendingJob(BackupScheduling.PERIODIC))
+    }
+
+    @Test fun individualPickerKeepsOriginalCaptureDateAndFallsBackWhenMissing() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("media", object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?): android.database.Cursor {
+                val taken = if (uri.lastPathSegment == "1") 1_700_000_000_123L else 0L
+                return android.database.MatrixCursor(projection!!).apply {
+                    addRow(arrayOf<Any>("dated.jpg", 10L, 1_800_000_000L, "Camera/", taken))
+                }
+            }
+            override fun getType(uri: android.net.Uri) = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
+            override fun delete(uri: android.net.Uri, selection: String?, args: Array<out String>?) = 0
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = 0
+        })
+        val ids = setOf("content://media/external/images/media/1", "content://media/external/images/media/2")
+        val media = gay.benjifox.foxyphotos.core.media.MediaStoreFolderScanner(context.contentResolver).scanSelectedItems(ids)
+        assertEquals(1_700_000_000L, media.first { it.uri.lastPathSegment == "1" }.captureEpochSeconds)
+        assertEquals(1_800_000_000L, media.first { it.uri.lastPathSegment == "2" }.captureEpochSeconds)
     }
 }

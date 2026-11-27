@@ -76,7 +76,7 @@ internal class AndroidBackupWork(private val context: Context) {
                         credential = credential,
                         fileName = item.displayName,
                         sizeBytes = item.sizeBytes,
-                        modifiedEpochSeconds = item.modifiedEpochSeconds,
+                        modifiedEpochSeconds = item.captureEpochSeconds,
                         sha1 = hashed.sha1,
                         fileType = fileType,
                         beforeBytes = { !shouldPause() && policy.allowsFolder(item.relativePath) && policy.reasons(item.uri.toString()).isEmpty() },
